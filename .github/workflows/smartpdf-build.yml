@@ -1,0 +1,31 @@
+# smartpdf: build SumatraPDF.exe on GitHub's Windows servers so no local
+# Visual Studio install is needed. The finished exe is downloadable from the
+# workflow run's "Artifacts" section on the repo's Actions page.
+name: smartpdf build
+
+on:
+  push:
+    branches:
+      - claude/sumatrapdf-search-links-mmf8tp
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build SumatraPDF (Release x64)
+    runs-on: windows-latest
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: msbuild vs2022\SumatraPDF.sln /p:Configuration=Release /p:Platform=x64 /t:SumatraPDF /m
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: SumatraPDF-smartpdf-x64
+          path: out/rel64/SumatraPDF.exe
+          if-no-files-found: error
