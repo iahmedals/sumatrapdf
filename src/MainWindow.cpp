@@ -562,6 +562,30 @@ void LinkHandler::LaunchURL(Str uri) {
         return;
     }
 
+    // smartpdf: a "search:<term>" uri triggers in-app text search
+    // and must never be passed to the OS shell
+    if (str::StartsWithI(uri, "search:")) {
+        TempStr term = str::DupTemp(Str(uri.s + 7));
+        url::DecodeInPlace(term);
+        term = Str(term.s); // DecodeInPlace shortens the buffer in place; re-read its length
+        DisplayModel* dm = win ? win->AsFixed() : nullptr;
+        if (dm && len(term) > 0) {
+            // net names are whole, all-caps tokens: force whole-word + match-case
+            // so that e.g. CLK doesn't match inside CLK_EN
+            const bool matchCase = true;
+            win->findMatchWholeWord = true;
+            win->findMatchCase = matchCase;
+            dm->textSearch->SetMatchWholeWord(true);
+            dm->textSearch->SetMatchCase(matchCase);
+            FindBarSetMatchWholeWordChecked(win, true);
+            FindBarSetMatchCaseChecked(win, matchCase);
+            HwndSetText(win->hwndFindEdit, term);
+            FindTextOnThread(win, TextSearch::Direction::Forward, term, /*wasModified*/ true,
+                             /*showProgress*/ true);
+        }
+        return;
+    }
+
     TempStr path = str::DupTemp(uri);
     int colon = str::IndexOfChar(path, ':');
     int hash = str::IndexOfChar(path, '#');
