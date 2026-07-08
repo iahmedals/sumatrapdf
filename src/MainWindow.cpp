@@ -562,14 +562,29 @@ void LinkHandler::LaunchURL(Str uri) {
         return;
     }
 
-    // smartpdf: a "search:<term>" uri triggers in-app text search
-    // and must never be passed to the OS shell
+    // smartpdf: a "search:<term>[?z=<percent>]" uri triggers in-app text search,
+    // optionally zooming first, and must never be passed to the OS shell
     if (str::StartsWithI(uri, "search:")) {
         TempStr term = str::DupTemp(Str(uri.s + 7));
+        // the optional ?z=<percent> suffix is split off before percent-decoding;
+        // smartify.py %-encodes any literal '?' in net names
+        float zoomPercent = 0;
+        int q = str::IndexOfChar(term, '?');
+        if (q >= 0) {
+            Str args = Str(term.s + q + 1);
+            if (str::StartsWithI(args, "z=")) {
+                zoomPercent = (float)atof(args.s + 2);
+            }
+            term.len = q;
+            term.s[q] = '\0';
+        }
         url::DecodeInPlace(term);
         term = Str(term.s); // DecodeInPlace shortens the buffer in place; re-read its length
         DisplayModel* dm = win ? win->AsFixed() : nullptr;
         if (dm && len(term) > 0) {
+            if (zoomPercent > 0) {
+                SmartZoom(win, zoomPercent, nullptr, false);
+            }
             // net names are whole, all-caps tokens: force whole-word + match-case
             // so that e.g. CLK doesn't match inside CLK_EN
             const bool matchCase = true;
@@ -582,6 +597,25 @@ void LinkHandler::LaunchURL(Str uri) {
             HwndSetText(win->hwndFindEdit, term);
             FindTextOnThread(win, TextSearch::Direction::Forward, term, /*wasModified*/ true,
                              /*showProgress*/ true);
+        }
+        return;
+    }
+
+    // smartpdf: a "folder:<%-encoded path>" uri opens the directory in the
+    // default file manager and must never be passed to the OS shell as a url
+    if (str::StartsWithI(uri, "folder:")) {
+        TempStr dirPath = str::DupTemp(Str(uri.s + 7));
+        url::DecodeInPlace(dirPath);
+        dirPath = Str(dirPath.s);
+        // the linked leaf (e.g. "...\<pn>\Data Sheets") may not exist for
+        // every part; fall back to walking up a few parent directories
+        for (int i = 0; i < 3 && len(dirPath) > 0 && !dir::Exists(dirPath); i++) {
+            dirPath = path::GetDirTemp(dirPath);
+        }
+        if (len(dirPath) > 0 && dir::Exists(dirPath)) {
+            SumatraOpenPathInDefaultFileManager(dirPath);
+        } else {
+            logf("LinkHandler::LaunchURL: folder link target doesn't exist: '%s'\n", uri);
         }
         return;
     }
