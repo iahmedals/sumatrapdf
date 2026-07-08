@@ -50,10 +50,13 @@ def page1(c):
         "",
         "1. CLK        -> finds CLK here and on page 2; NEVER lands on",
         "                 CLK_EN, CLK_OUT, CLKX or lowercase clk",
-        "2. RESET      -> jumps to RESET on page 2",
+        "2. RESET      -> jumps to RESET on page 2 AND zooms to 300%",
         "3. DATA0      -> link is %-encoded; must still find DATA0",
         "4. MISSING_NET-> shows the normal 'not found' message, no crash",
         "5. https link -> still opens the browser (stock behavior)",
+        "6. GRM155R71C104KA88D -> opens browser: Google datasheet search",
+        "7. 214-0034   -> opens File Explorer at C:\\Windows (stand-in for",
+        "                 the company parts folder)",
     ):
         plain(c, 72, y, line, 10, "Helvetica")
         y -= 14
@@ -62,10 +65,17 @@ def page1(c):
     label_with_link(c, 100, 480, "CLK", "search:CLK")
     label_with_link(c, 220, 480, "CLK_EN", "search:CLK_EN")
     label_with_link(c, 380, 480, "CLK_OUT", "search:CLK_OUT")
-    label_with_link(c, 100, 420, "RESET", "search:RESET")
+    # ?z=300: viewer should zoom to 300% before jumping to the match
+    label_with_link(c, 100, 420, "RESET", "search:RESET?z=300")
     # %44 decodes to "D": proves url::DecodeInPlace runs on the term
     label_with_link(c, 260, 420, "DATA0", "search:%44ATA0")
     label_with_link(c, 100, 360, "MISSING_NET", "search:THIS_NET_EXISTS_NOWHERE")
+
+    # manufacturer part number -> browser datasheet search (plain https link)
+    label_with_link(c, 100, 550, "GRM155R71C104KA88D",
+                    "https://www.google.com/search?q=GRM155R71C104KA88D+datasheet", 11)
+    # company part number -> File Explorer; C:\Windows exists on every test PC
+    label_with_link(c, 380, 550, "214-0034", "folder:C%3A%5CWindows")
 
     # ordinary web link: must keep stock behavior
     c.setFont("Helvetica", 11)
