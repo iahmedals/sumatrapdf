@@ -11,8 +11,9 @@ Scans the PDF's words and turns three kinds of tokens into clickable links:
 3. Net names (ALL-CAPS tokens of 3+ chars: A-Z 0-9 _, e.g. CLK, VREG_S4A_1P8)
    -> search:<name>?z=<zoom>   (viewer runs whole-word text search, zoomed)
 
-Also builds a bookmarks sidebar (PDF outline): Nets and Parts trees whose
-entries jump to each name's first occurrence. Works in any PDF viewer.
+Also builds a bookmarks sidebar (PDF outline) listing the part numbers, each
+entry jumping to that part's first occurrence. Works in any PDF viewer.
+(--bookmarks all adds a Nets tree too; --bookmarks none disables the sidebar.)
 
 Usage:
     python smartify.py input.pdf                  -> writes input-smart.pdf
@@ -90,8 +91,9 @@ def main():
                     help="ignore words in the bottom FRACTION of each page, where "
                          "the title block and legal boilerplate live "
                          "(default: 0.15; use 0 to disable)")
-    ap.add_argument("--no-bookmarks", action="store_true",
-                    help="don't add the Nets/Parts bookmarks sidebar")
+    ap.add_argument("--bookmarks", choices=("parts", "all", "none"), default="parts",
+                    help="bookmarks sidebar content: 'parts' = part numbers only "
+                         "(default), 'all' = parts and nets, 'none' = no sidebar")
     args = ap.parse_args()
 
     out = args.output or re.sub(r"\.pdf$", "", args.input, flags=re.I) + "-smart.pdf"
@@ -139,7 +141,7 @@ def main():
 
     # pass 3: bookmarks sidebar (first occurrence per name)
     n_bookmarks = 0
-    if not args.no_bookmarks:
+    if args.bookmarks != "none":
         toc = []
 
         def add_section(title, names):
@@ -156,7 +158,8 @@ def main():
                 toc.extend(entries)
                 n_bookmarks += len(entries)
 
-        add_section("Nets", occurrences["net"])
+        if args.bookmarks == "all":
+            add_section("Nets", occurrences["net"])
         parts = dict(occurrences["company"])
         parts.update(occurrences["mpn"])
         add_section("Parts", parts)

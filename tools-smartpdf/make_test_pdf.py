@@ -55,8 +55,11 @@ def page1(c):
         "4. MISSING_NET-> shows the normal 'not found' message, no crash",
         "5. https link -> still opens the browser (stock behavior)",
         "6. GRM155R71C104KA88D -> opens browser: Google datasheet search",
-        "7. 214-0034   -> opens File Explorer at C:\\Windows (stand-in for",
-        "                 the company parts folder)",
+        "7. 214-0034   -> opens File Explorer at the parts library:",
+        "                 \\\\datastore\\groups\\Engineering\\Approved Component\\...",
+        "                 (needs the company network; climbs to the nearest",
+        "                 existing parent folder if 214-0034 isn't there)",
+        "8. LOCAL-DEMO -> same feature without the network: opens C:\\Windows",
     ):
         plain(c, 72, y, line, 10, "Helvetica")
         y -= 14
@@ -74,8 +77,15 @@ def page1(c):
     # manufacturer part number -> browser datasheet search (plain https link)
     label_with_link(c, 100, 550, "GRM155R71C104KA88D",
                     "https://www.google.com/search?q=GRM155R71C104KA88D+datasheet", 11)
-    # company part number -> File Explorer; C:\Windows exists on every test PC
-    label_with_link(c, 380, 550, "214-0034", "folder:C%3A%5CWindows")
+    # company part number -> File Explorer at the parts library (same path
+    # template smartify.py uses; exercises the parent-walk fallback too)
+    import urllib.parse
+    parts_path = (r"\\datastore\groups\Engineering\Approved Component"
+                  r"\214\214-0034\Data Sheets")
+    label_with_link(c, 380, 550, "214-0034",
+                    "folder:" + urllib.parse.quote(parts_path, safe=""))
+    # off-network demo of the same feature
+    label_with_link(c, 490, 550, "LOCAL-DEMO", "folder:C%3A%5CWindows", 10)
 
     # ordinary web link: must keep stock behavior
     c.setFont("Helvetica", 11)
