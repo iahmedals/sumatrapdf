@@ -1527,6 +1527,10 @@ static void UpdateUiForCurrentTab(MainWindow* win) {
     if (pageInfoWnd) {
         UpdatePageInfoHelper(win->ctrl, pageInfoWnd, -1);
     }
+    // smartpdf: the review panel shows the current tab's comments
+    if (win->reviewVisible) {
+        RebuildReviewPanel(win);
+    }
 
     UpdateFindbox(win);
 
@@ -4931,7 +4935,10 @@ static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
 
     HWND hwndAIChatBox = nullptr;
     Splitter* aiChatSplitter = nullptr;
-    if (win->codexVisible && win->hwndCodexBox) {
+    if (win->reviewVisible && win->hwndReviewBox) {
+        hwndAIChatBox = win->hwndReviewBox;
+        aiChatSplitter = win->reviewSplitter;
+    } else if (win->codexVisible && win->hwndCodexBox) {
         hwndAIChatBox = win->hwndCodexBox;
         aiChatSplitter = win->codexSplitter;
     } else if (win->grokVisible && win->hwndGrokBox) {
@@ -4974,7 +4981,9 @@ static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     if (favVisible) {
         RedrawWindow(win->hwndFavBox, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
     }
-    if (win->codexVisible && win->hwndCodexBox) {
+    if (win->reviewVisible && win->hwndReviewBox) {
+        RelayoutReviewPanel(win);
+    } else if (win->codexVisible && win->hwndCodexBox) {
         RelayoutCodexPanel(win);
     } else if (win->grokVisible && win->hwndGrokBox) {
         RelayoutGrokPanel(win);
@@ -7637,6 +7646,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             ImportReviewComments(win, tab);
             break;
         }
+        case CmdToggleReviewPanel: {
+            ToggleReviewPanel(win);
+            break;
+        }
 
         case CmdReadAloud: {
             if (!tab) {
@@ -8705,6 +8718,9 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         return 0;
     }
     UpdateAnnotationsList(tab->editAnnotsWindow);
+    if (win->reviewVisible) {
+        RebuildReviewPanel(win);
+    }
 
     EditAnnotFocus focusTarget = EditAnnotFocus::Default;
     if (GetCommandBoolArg(cmd, kCmdArgFocusEdit, false)) {

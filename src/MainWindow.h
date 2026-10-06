@@ -11,6 +11,8 @@ struct FrameRateWnd;
 struct ReadAloudPlaybackBar;
 struct LabelWithCloseWnd;
 struct Splitter;
+struct ListBox;
+struct ReviewCommentInfo;
 struct Tooltip;
 struct TreeView;
 struct ILayout;
@@ -220,6 +222,17 @@ struct MainWindow {
 
     // width of the active AI chat sidebar (shared by Claude Code, Grok Build, and OpenAI Codex)
     int aiChatDx = 0;
+
+    // smartpdf review comments panel (right side, shares the AI chat slot and width)
+    HWND hwndReviewBox = nullptr;
+    UINT_PTR reviewBoxSubclassId = 0;
+    LabelWithCloseWnd* reviewLabelWithClose = nullptr;
+    ListBox* reviewListBox = nullptr;
+    Edit* reviewDetails = nullptr;
+    Splitter* reviewSplitter = nullptr;
+    bool reviewVisible = false;
+    // owned; rebuilt by RebuildReviewPanel (EditAnnotations.cpp)
+    Vec<ReviewCommentInfo*>* reviewItems = nullptr;
 
     // vertical splitter for resizing left side panel
     Splitter* sidebarSplitter = nullptr;

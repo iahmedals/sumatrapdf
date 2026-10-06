@@ -9,11 +9,14 @@ extern "C" {
 #include "base/File.h"
 #include "base/DirIter.h"
 #include "base/StrUtf8.h"
+#include "base/UITask.h"
+#include "base/Dpi.h"
 #include "base/Win.h"
 
 #include "wingui/UIModels.h"
 #include "wingui/Layout.h"
 #include "wingui/WinGui.h"
+#include "wingui/LabelWithCloseWnd.h"
 
 #include "Settings.h"
 #include "AppSettings.h"
@@ -32,6 +35,7 @@ extern "C" {
 #include "SumatraPDF.h"
 #include "Notifications.h"
 #include "TextSelection.h"
+#include "AIChatCommon.h"
 #include "DarkModeSubclass.h"
 
 
@@ -219,6 +223,9 @@ void DeleteAnnotationAndUpdateUI(WindowTab* tab, Annotation* annot) {
 #endif
     }
     SetSelectedAnnotation(tab, selectNext);
+    if (tab->win && tab->win->reviewVisible) {
+        RebuildReviewPanel(tab->win);
+    }
 }
 
 static void DeleteSelectedAnnotation(EditAnnotationsWindow* ew) {
@@ -2111,6 +2118,9 @@ void PublishReviewComments(MainWindow* win, WindowTab* tab) {
         return;
     }
     RebuildAllCommentsCsv(reviewDir);
+    if (win->reviewVisible) {
+        RebuildReviewPanel(win);
+    }
     ShowReviewNotification(win, fmt(_TRA("Published %d review comments to %s").s, n, reviewDir), false);
 }
 
@@ -2199,6 +2209,9 @@ void ImportReviewComments(MainWindow* win, WindowTab* tab) {
     }
     UpdateAnnotationsList(tab->editAnnotsWindow);
     MainWindowRerender(win);
+    if (win->reviewVisible) {
+        RebuildReviewPanel(win);
+    }
     if (nComments == 0) {
         ShowReviewNotification(win, fmt(_TRA("No review comments found in %s").s, reviewDir), true);
     } else {
@@ -2207,4 +2220,477 @@ void ImportReviewComments(MainWindow* win, WindowTab* tab) {
                      nComments, nReviewers),
             false);
     }
+}
+
+/* ----------------------------------------------------------------------------
+smartpdf review panel: a right-side sidebar (sharing the AI chat slot and
+width) that lists every review comment of the current tab as a card and shows
+the full details of the selected one underneath. Clicking a card jumps to the
+comment's exact spot on the page.
+---------------------------------------------------------------------------- */
+
+#define IDC_REVIEW_LABEL_WITH_CLOSE 1180
+
+constexpr int kReviewPanelMinDx = 150;
+constexpr int kReviewCardLines = 3;
+
+// stable per-reviewer accent colors so the designer can tell at a glance
+// whose comment a card is
+static COLORREF gReviewerColors[] = {
+    RGB(0x2e, 0x7d, 0x32), RGB(0x15, 0x65, 0xc0), RGB(0xc6, 0x28, 0x28), RGB(0x6a, 0x1b, 0x9a),
+    RGB(0xef, 0x6c, 0x00), RGB(0x00, 0x83, 0x8f), RGB(0xad, 0x14, 0x57), RGB(0x55, 0x8b, 0x2f),
+};
+
+static COLORREF ReviewerColor(Str name) {
+    u32 h = 5381;
+    for (int i = 0; i < name.len; i++) {
+        h = h * 33 + (u8)name.s[i];
+    }
+    return gReviewerColors[h % dimof(gReviewerColors)];
+}
+
+static void ClearReviewItems(MainWindow* win) {
+    if (!win->reviewItems) {
+        return;
+    }
+    DeleteVecMembers(*win->reviewItems);
+    win->reviewItems->Reset();
+}
+
+static void UpdateReviewDetails(MainWindow* win) {
+    if (!win->reviewDetails) {
+        return;
+    }
+    int idx = win->reviewListBox ? win->reviewListBox->GetCurrentSelection() : -1;
+    if (!win->reviewItems || idx < 0 || idx >= len(*win->reviewItems)) {
+        win->reviewDetails->SetText(StrL(""));
+        return;
+    }
+    ReviewCommentInfo* rci = win->reviewItems->At(idx);
+    str::Builder b;
+    b.Append(fmt("%s: %s\r\n", _TRA("Reviewer"), rci->reviewer));
+    b.Append(fmt("%s: %d\r\n", _TRA("Page"), rci->page));
+    if (len(rci->sheet) > 0) {
+        b.Append(fmt("%s: %s\r\n", _TRA("Sheet"), rci->sheet));
+    }
+    if (len(rci->component) > 0) {
+        b.Append(fmt("%s: %s\r\n", _TRA("Component"), rci->component));
+    }
+    if (len(rci->clicked) > 0) {
+        b.Append(fmt("%s: %s\r\n", _TRA("Clicked text"), rci->clicked));
+    }
+    if (len(rci->rev) > 0) {
+        b.Append(fmt("%s: %s\r\n", _TRA("Revision"), rci->rev));
+    }
+    if (len(rci->date) > 0) {
+        b.Append(fmt("%s: %s\r\n", _TRA("Date"), rci->date));
+    }
+    b.Append(StrL("\r\n"));
+    b.Append(rci->comment);
+    Str s = b.TakeStr();
+    win->reviewDetails->SetText(s);
+    str::Free(s);
+}
+
+static void DrawReviewCard(MainWindow* win, ListBox::DrawItemEvent* ev) {
+    if (!win->reviewItems || ev->itemIndex < 0 || ev->itemIndex >= len(*win->reviewItems)) {
+        return;
+    }
+    ReviewCommentInfo* rci = win->reviewItems->At(ev->itemIndex);
+    ListBox* lb = ev->listBox;
+    HDC hdc = ev->hdc;
+    RECT rc = ev->itemRect;
+
+    COLORREF colBg = IsSpecialColor(lb->bgColor) ? GetSysColor(COLOR_WINDOW) : lb->bgColor;
+    COLORREF colText = IsSpecialColor(lb->textColor) ? GetSysColor(COLOR_WINDOWTEXT) : lb->textColor;
+    if (ev->selected) {
+        colBg = AccentColor(colBg, 30);
+    }
+    SetBkColor(hdc, colBg);
+    ExtTextOutW(hdc, 0, 0, ETO_OPAQUE, &rc, nullptr, 0, nullptr);
+    SetBkMode(hdc, TRANSPARENT);
+
+    // reviewer color stripe on the left edge
+    RECT rcStripe = rc;
+    rcStripe.right = rcStripe.left + DpiScale(lb->hwnd, 4);
+    HBRUSH br = CreateSolidBrush(ReviewerColor(rci->reviewer));
+    FillRect(hdc, &rcStripe, br);
+    DeleteObject(br);
+
+    HFONT oldFont = lb->font ? SelectFont(hdc, lb->font) : nullptr;
+    int pad = DpiScale(lb->hwnd, 8);
+    int lineDy = (rc.bottom - rc.top) / kReviewCardLines;
+    RECT rcLine = rc;
+    rcLine.left += pad;
+    rcLine.right -= pad;
+    uint dtFmt = DT_SINGLELINE | DT_NOPREFIX | DT_LEFT | DT_END_ELLIPSIS | DT_VCENTER;
+
+    // line 1: "R45 - Page 12 - alice"
+    rcLine.top = rc.top;
+    rcLine.bottom = rc.top + lineDy;
+    str::Builder l1;
+    if (len(rci->component) > 0) {
+        l1.Append(rci->component);
+        l1.Append(StrL(" - "));
+    }
+    l1.Append(fmt(_TRA("Page %d").s, rci->page));
+    l1.Append(StrL(" - "));
+    l1.Append(rci->reviewer);
+    Str l1s = l1.TakeStr();
+    SetTextColor(hdc, ReviewerColor(rci->reviewer));
+    int cch;
+    WCHAR* ws = CWStrTemp(l1s, cch);
+    DrawTextW(hdc, ws, cch, &rcLine, dtFmt);
+    str::Free(l1s);
+
+    // line 2: the comment
+    rcLine.top = rcLine.bottom;
+    rcLine.bottom = rcLine.top + lineDy;
+    SetTextColor(hdc, colText);
+    ws = CWStrTemp(rci->comment, cch);
+    DrawTextW(hdc, ws, cch, &rcLine, dtFmt);
+
+    // line 3: sheet / rev / date, dimmed
+    rcLine.top = rcLine.bottom;
+    rcLine.bottom = rc.bottom;
+    str::Builder l3;
+    if (len(rci->sheet) > 0) {
+        l3.Append(rci->sheet);
+    }
+    if (len(rci->rev) > 0) {
+        if (!l3.IsEmpty()) {
+            l3.Append(StrL(" - "));
+        }
+        l3.Append(rci->rev);
+    }
+    if (len(rci->date) > 0) {
+        if (!l3.IsEmpty()) {
+            l3.Append(StrL(" - "));
+        }
+        l3.Append(rci->date);
+    }
+    Str l3s = l3.TakeStr();
+    SetTextColor(hdc, AccentColor(colText, 80));
+    ws = CWStrTemp(l3s, cch);
+    DrawTextW(hdc, ws, cch, &rcLine, dtFmt);
+    str::Free(l3s);
+
+    if (oldFont) {
+        SelectFont(hdc, oldFont);
+    }
+}
+
+struct ReviewGoToData {
+    MainWindow* win = nullptr;
+    int pageNo = 0;
+    RectF rect{};
+};
+
+static void ReviewGoTo(ReviewGoToData* d) {
+    AutoDelete del(d);
+    MainWindow* win = d->win;
+    if (!IsMainWindowValid(win) || !win->ctrl) {
+        return;
+    }
+    if (d->pageNo < 1 || d->pageNo > win->ctrl->PageCount()) {
+        return;
+    }
+    win->ctrl->ScrollTo(d->pageNo, d->rect, 0);
+}
+
+static void OnReviewCardSelected(MainWindow* win) {
+    UpdateReviewDetails(win);
+    int idx = win->reviewListBox ? win->reviewListBox->GetCurrentSelection() : -1;
+    if (!win->reviewItems || idx < 0 || idx >= len(*win->reviewItems)) {
+        return;
+    }
+    ReviewCommentInfo* rci = win->reviewItems->At(idx);
+    // defer navigation so the list can repaint first; capture by value, the
+    // annotation pointer might not survive until the task runs
+    auto d = new ReviewGoToData;
+    d->win = win;
+    d->pageNo = rci->page;
+    d->rect = RectF{rci->x, rci->y, 24, 24};
+    uitask::Post(MkFunc0<ReviewGoToData>(ReviewGoTo, d), "ReviewGoTo");
+    // also select the annotation so it's highlighted and editable
+    WindowTab* tab = win->CurrentTab();
+    if (tab && rci->annot) {
+        SetSelectedAnnotation(tab, rci->annot);
+    }
+}
+
+void RebuildReviewPanel(MainWindow* win) {
+    if (!win || !win->hwndReviewBox || !win->reviewListBox) {
+        return;
+    }
+    ClearReviewItems(win);
+    WindowTab* tab = win->CurrentTab();
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (engine && EngineSupportsAnnotations(engine)) {
+        Str me = AnnotationAuthorNameTemp();
+        TempStr rev = path::GetBaseNameTemp(tab->filePath);
+        Vec<Annotation*> annots;
+        EngineGetAnnotations(engine, annots);
+        for (Annotation* annot : annots) {
+            AnnotationType tp = Type(annot);
+            if (tp != AnnotationType::Text && tp != AnnotationType::FreeText) {
+                continue;
+            }
+            auto rci = new ReviewCommentInfo();
+            rci->annot = annot;
+            rci->tab = tab;
+            rci->page = PageNo(annot);
+            RectF r = GetRect(annot);
+            rci->x = r.x;
+            rci->y = r.y;
+            // imported comments keep their CSV fields
+            ReviewCommentInfo* imported = nullptr;
+            for (ReviewCommentInfo* c : gImportedReviewComments) {
+                if (c->annot == annot) {
+                    imported = c;
+                    break;
+                }
+            }
+            if (imported) {
+                rci->imported = true;
+                rci->rev = str::Dup(imported->rev);
+                rci->sheet = str::Dup(imported->sheet);
+                rci->component = str::Dup(imported->component);
+                rci->clicked = str::Dup(imported->clicked);
+                rci->comment = str::Dup(imported->comment);
+                rci->reviewer = str::Dup(imported->reviewer);
+                rci->date = str::Dup(imported->date);
+            } else {
+                Str contents = Contents(annot);
+                if (str::IsEmptyOrWhiteSpace(contents)) {
+                    delete rci;
+                    continue;
+                }
+                PointF pt{r.x, r.y};
+                TempStr designator = {};
+                TempStr clicked = {};
+                ScanWordsNearPoint(engine, rci->page, pt, &designator, &clicked);
+                Str author = Author(annot);
+                rci->rev = str::Dup(rev);
+                rci->sheet = str::Dup(SheetTitleTemp(dm, rci->page));
+                rci->component = str::Dup(designator);
+                rci->clicked = str::Dup(clicked);
+                rci->comment = str::Dup(contents);
+                rci->reviewer = str::Dup(len(author) > 0 ? author : me);
+                rci->date = str::Dup(FmtTimeTemp(ModificationDate(annot)));
+            }
+            // insert sorted by page
+            int pos = 0;
+            while (pos < len(*win->reviewItems) && win->reviewItems->At(pos)->page <= rci->page) {
+                pos++;
+            }
+            win->reviewItems->InsertAt(pos, rci);
+        }
+    }
+    // the model only drives the item count; cards are owner-drawn
+    auto model = new ListBoxModelStrings();
+    for (int i = 0; i < len(*win->reviewItems); i++) {
+        model->strings.Append(win->reviewItems->At(i)->comment);
+    }
+    win->reviewListBox->SetModel(model);
+    if (win->reviewLabelWithClose) {
+        TempStr title = fmt(_TRA("Review Comments (%d)").s, len(*win->reviewItems));
+        win->reviewLabelWithClose->SetLabel(title);
+    }
+    UpdateReviewDetails(win);
+}
+
+static void LayoutReviewBox(MainWindow* win) {
+    if (!win || !win->hwndReviewBox || !win->reviewLabelWithClose) {
+        return;
+    }
+    Rect rc = ClientRect(win->hwndReviewBox);
+    if (rc.dx <= 0 || rc.dy <= 0) {
+        return;
+    }
+    int labelDy = win->reviewLabelWithClose->GetIdealSize().dy;
+    int detailsDy = limitValue(rc.dy / 3, DpiScale(win->hwndReviewBox, 120), DpiScale(win->hwndReviewBox, 260));
+    int listDy = rc.dy - labelDy - detailsDy;
+    if (listDy < 0) {
+        listDy = 0;
+    }
+    MoveWindow(win->reviewLabelWithClose->hwnd, 0, 0, rc.dx, labelDy, TRUE);
+    if (win->reviewListBox) {
+        MoveWindow(win->reviewListBox->hwnd, 0, labelDy, rc.dx, listDy, TRUE);
+    }
+    if (win->reviewDetails) {
+        MoveWindow(win->reviewDetails->hwnd, 0, labelDy + listDy, rc.dx, detailsDy, TRUE);
+    }
+}
+
+void RelayoutReviewPanel(MainWindow* win) {
+    if (!win || !win->hwndReviewBox || !win->reviewVisible) {
+        return;
+    }
+    LayoutReviewBox(win);
+    RedrawWindow(win->hwndReviewBox, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
+    if (win->reviewSplitter && win->reviewSplitter->hwnd) {
+        InvalidateRect(win->reviewSplitter->hwnd, nullptr, TRUE);
+    }
+}
+
+static void OnReviewSplitterMove(Splitter::MoveEvent* ev) {
+    Splitter* splitter = ev->w;
+    MainWindow* win = FindMainWindowByHwnd(splitter->hwnd);
+    if (!win) {
+        return;
+    }
+    Point pcur = HwndGetCursorPos(win->hwndFrame);
+    Rect rFrame = ClientRect(win->hwndFrame);
+    int dx = rFrame.dx - pcur.x;
+    if (dx < kReviewPanelMinDx || dx > rFrame.dx / 2) {
+        ev->resizeAllowed = false;
+        return;
+    }
+    AIChatUpdateSidebarDx(win, dx, ev->finishedDragging);
+    if (ev->finishedDragging) {
+        RelayoutWindow(win);
+    }
+}
+
+static LRESULT CALLBACK WndProcReviewBox(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
+    MainWindow* win = (MainWindow*)data;
+    if (!win) {
+        return DefSubclassProc(hwnd, msg, wp, lp);
+    }
+    LRESULT res = TryReflectMessages(hwnd, msg, wp, lp);
+    if (res) {
+        return res;
+    }
+    switch (msg) {
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wp;
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            FillRect(hdc, &rc, win->brControlBgColor);
+            return TRUE;
+        }
+        case WM_SIZE:
+            LayoutReviewBox(win);
+            break;
+        case WM_COMMAND:
+            if (LOWORD(wp) == IDC_REVIEW_LABEL_WITH_CLOSE) {
+                ToggleReviewPanel(win);
+            }
+            break;
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+static void CreateReviewPanel(MainWindow* win) {
+    if (win->hwndReviewBox) {
+        return;
+    }
+    HMODULE hmod = GetModuleHandle(nullptr);
+    DWORD style = WS_CHILD | WS_CLIPCHILDREN;
+    HWND parent = win->hwndFrame;
+    int dx = gGlobalPrefs->sidebarDx;
+    win->hwndReviewBox = CreateWindowExW(0, WC_STATIC, L"", style, 0, 0, dx, 0, parent, nullptr, hmod, nullptr);
+    if (!win->hwndReviewBox) {
+        return;
+    }
+    win->reviewItems = new Vec<ReviewCommentInfo*>();
+
+    {
+        Splitter::CreateArgs args;
+        args.parent = win->hwndFrame;
+        args.type = SplitterType::Vert;
+        args.isLive = false;
+        win->reviewSplitter = new Splitter();
+        win->reviewSplitter->onMove = MkFunc1Void(OnReviewSplitterMove);
+        win->reviewSplitter->Create(args);
+    }
+
+    {
+        LabelWithCloseWnd::CreateArgs args;
+        args.parent = win->hwndReviewBox;
+        args.cmdId = IDC_REVIEW_LABEL_WITH_CLOSE;
+        args.isRtl = IsUIRtl();
+        args.font = GetDefaultGuiFont(true, false);
+        auto label = new LabelWithCloseWnd();
+        label->Create(args);
+        label->SetPaddingXY(2, 2);
+        label->SetLabel(_TRA("Review Comments"));
+        win->reviewLabelWithClose = label;
+    }
+
+    {
+        ListBox::CreateArgs args;
+        args.parent = win->hwndReviewBox;
+        args.font = GetDefaultGuiFont();
+        auto lb = new ListBox();
+        lb->onDrawItem = MkFunc1(DrawReviewCard, win);
+        lb->onSelectionChanged = MkFunc0(OnReviewCardSelected, win);
+        lb->Create(args);
+        // taller rows: each card holds kReviewCardLines lines of text
+        Size sz = HwndMeasureText(lb->hwnd, StrL("Ag"), args.font);
+        int cardDy = kReviewCardLines * (sz.dy + DpiScale(lb->hwnd, 2)) + DpiScale(lb->hwnd, 6);
+        SendMessageW(lb->hwnd, LB_SETITEMHEIGHT, 0, cardDy);
+        win->reviewListBox = lb;
+    }
+
+    {
+        Edit::CreateArgs args;
+        args.parent = win->hwndReviewBox;
+        args.isMultiLine = true;
+        args.font = GetDefaultGuiFont();
+        auto ed = new Edit();
+        ed->Create(args);
+        // ES_READONLY can only be changed via EM_SETREADONLY
+        SendMessageW(ed->hwnd, EM_SETREADONLY, TRUE, 0);
+        win->reviewDetails = ed;
+    }
+
+    win->reviewBoxSubclassId = NextSubclassId();
+    SetWindowSubclass(win->hwndReviewBox, WndProcReviewBox, win->reviewBoxSubclassId, (DWORD_PTR)win);
+}
+
+void ToggleReviewPanel(MainWindow* win) {
+    if (!win) {
+        return;
+    }
+    if (!win->hwndReviewBox) {
+        CreateReviewPanel(win);
+    }
+    if (!win->hwndReviewBox) {
+        return;
+    }
+    win->reviewVisible = !win->reviewVisible;
+    HwndSetVisibility(win->hwndReviewBox, win->reviewVisible);
+    if (win->reviewSplitter && win->reviewSplitter->hwnd) {
+        HwndSetVisibility(win->reviewSplitter->hwnd, win->reviewVisible);
+    }
+    if (win->reviewVisible) {
+        RebuildReviewPanel(win);
+    }
+    RelayoutWindow(win);
+}
+
+void DestroyReviewPanel(MainWindow* win) {
+    if (!win || !win->hwndReviewBox) {
+        return;
+    }
+    RemoveWindowSubclass(win->hwndReviewBox, WndProcReviewBox, win->reviewBoxSubclassId);
+    // ~ListBox deletes its model
+    delete win->reviewListBox;
+    win->reviewListBox = nullptr;
+    delete win->reviewDetails;
+    win->reviewDetails = nullptr;
+    delete win->reviewLabelWithClose;
+    win->reviewLabelWithClose = nullptr;
+    delete win->reviewSplitter;
+    win->reviewSplitter = nullptr;
+    if (win->reviewItems) {
+        DeleteVecMembers(*win->reviewItems);
+        delete win->reviewItems;
+        win->reviewItems = nullptr;
+    }
+    DestroyWindow(win->hwndReviewBox);
+    win->hwndReviewBox = nullptr;
 }

@@ -2,6 +2,9 @@
    License: Simplified BSD (see COPYING.BSD) */
 
 struct EditAnnotationsWindow;
+struct WindowTab;
+struct Annotation;
+struct MainWindow;
 
 enum class EditAnnotFocus {
     Default,
@@ -17,7 +20,10 @@ void UpdateAnnotationsList(EditAnnotationsWindow*);
 void NotifyAnnotationsChanged(EditAnnotationsWindow*);
 
 // smartpdf review mode (implemented in EditAnnotations.cpp)
-struct MainWindow;
 void PublishReviewComments(MainWindow*, WindowTab*);
 void ImportReviewComments(MainWindow*, WindowTab*);
 void ClearImportedReviewComments(WindowTab*); // nullptr = all tabs
+void ToggleReviewPanel(MainWindow*);
+void RebuildReviewPanel(MainWindow*);
+void RelayoutReviewPanel(MainWindow*);
+void DestroyReviewPanel(MainWindow*);

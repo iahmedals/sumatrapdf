@@ -33,6 +33,7 @@
 #include "MainWindow.h"
 #include "FindBar.h"
 #include "FindWindow.h"
+#include "EditAnnotations.h"
 #include "SearchAndDDE.h"
 #include "RefHover.h"
 #include "WindowTab.h"
@@ -187,6 +188,7 @@ MainWindow::~MainWindow() {
     DestroyClaudePanel(this);
     DestroyGrokPanel(this);
     DestroyCodexPanel(this);
+    DestroyReviewPanel(this);
 
     delete sidebarSplitter;
     delete favSplitter;
