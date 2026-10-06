@@ -83,12 +83,13 @@ passed to Windows — no protocol handlers, no registry entries. Every other kin
 ## Versions
 
 - **v0.1.0** — commit `789a6f5`: click-to-search for nets (no zoom), smartify v1, CI, test PDF.
-- **v0.2.0** — zoom on net click, browser search for manufacturer part numbers, File
-  Explorer for company part numbers, bookmarks sidebar, smarter token classification.
-- **v0.3.0** — design review mode: click-to-comment with auto-opening comment box,
-  Publish/Import review comments over a shared folder, merged ALL-comments.csv central
-  sheet, Review Comments panel with clickable cards, revision-proof review folder;
-  smartify --nets/--bom knowledge files.
+- **v0.2.0** — commit `9e2a616` (+ feedback fixes `e7cd62a`): zoom on net click, browser
+  search for manufacturer part numbers, File Explorer for company part numbers, bookmarks
+  sidebar, smarter token classification.
+- **v0.3.0** — commit `69fc241`: design review mode: click-to-comment with auto-opening
+  comment box, Publish/Import review comments over a shared folder, merged
+  ALL-comments.csv central sheet, Review Comments panel with clickable cards,
+  revision-proof review folder; smartify --nets/--bom knowledge files.
 
 (Tags exist in the local development clone; pushing tags is blocked in the build
 environment, so use the commit hashes above to check out a version.)
