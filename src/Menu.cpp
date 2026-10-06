@@ -1067,6 +1067,14 @@ static MenuDef menuDefContext[] = {
         CmdSaveAnnotations,
     },
     {
+        _TRN("Publish Review Comments"),
+        CmdPublishReviewComments,
+    },
+    {
+        _TRN("Import Review Comments"),
+        CmdImportReviewComments,
+    },
+    {
         _TRN("Show Errors"),
         CmdShowErrors,
     },

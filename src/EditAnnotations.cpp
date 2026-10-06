@@ -7,6 +7,8 @@ extern "C" {
 
 #include "base/Base.h"
 #include "base/File.h"
+#include "base/DirIter.h"
+#include "base/StrUtf8.h"
 #include "base/Win.h"
 
 #include "wingui/UIModels.h"
@@ -28,6 +30,8 @@ extern "C" {
 #include "WindowTab.h"
 #include "EditAnnotations.h"
 #include "SumatraPDF.h"
+#include "Notifications.h"
+#include "TextSelection.h"
 #include "DarkModeSubclass.h"
 
 
@@ -1719,4 +1723,488 @@ void ShowEditAnnotationsWindow(WindowTab* tab, Annotation* annot, EditAnnotFocus
     // important to call this after hooking up onSize to ensure
     // first layout is triggered
     ew->SetIsVisible(true);
+}
+
+/* ----------------------------------------------------------------------------
+smartpdf review mode: multi-reviewer schematic review over a shared folder.
+
+Next to the reviewed PDF lives one fixed-name folder shared by every revision
+of the design:
+
+    review-comments\
+        <user>.csv          one file per reviewer -> no write conflicts
+        ALL-comments.csv    auto-merged master, opens directly in Excel
+
+Publish writes the current user's sticky-note comments with auto-derived
+context (sheet title, nearest component designator, clicked word). Import
+recreates every other reviewer's comments as overlay sticky notes; they are
+never saved into the PDF unless the user explicitly saves annotations.
+---------------------------------------------------------------------------- */
+
+constexpr char kReviewDirName[] = "review-comments";
+constexpr char kAllCommentsName[] = "ALL-comments.csv";
+constexpr char kReviewImportMarker[] = "[REVIEW] ";
+constexpr char kReviewCsvHeader[] = "Rev,Page,Sheet,Component,ClickedText,Comment,Reviewer,Date,X,Y\r\n";
+
+// full details of one review comment, kept for the review panel so imported
+// rows don't lose CSV fields and own rows are computed once
+struct ReviewCommentInfo {
+    Annotation* annot = nullptr;
+    WindowTab* tab = nullptr;
+    bool imported = false;
+    int page = 0;
+    float x = 0, y = 0;
+    Str rev;
+    Str sheet;
+    Str component;
+    Str clicked;
+    Str comment;
+    Str reviewer;
+    Str date;
+    ~ReviewCommentInfo() {
+        str::Free(rev);
+        str::Free(sheet);
+        str::Free(component);
+        str::Free(clicked);
+        str::Free(comment);
+        str::Free(reviewer);
+        str::Free(date);
+    }
+};
+
+static Vec<ReviewCommentInfo*> gImportedReviewComments;
+
+void ClearImportedReviewComments(WindowTab* tab) {
+    for (int i = len(gImportedReviewComments) - 1; i >= 0; i--) {
+        ReviewCommentInfo* rci = gImportedReviewComments[i];
+        if (!tab || rci->tab == tab) {
+            delete rci;
+            gImportedReviewComments.RemoveAt(i);
+        }
+    }
+}
+
+Vec<ReviewCommentInfo*>* GetImportedReviewComments() {
+    return &gImportedReviewComments;
+}
+
+static TempStr ReviewDirTemp(WindowTab* tab) {
+    TempStr dir = path::GetDirTemp(tab->filePath);
+    return path::JoinTemp(dir, StrL(kReviewDirName));
+}
+
+static TempStr SanitizeFileNameTemp(Str name) {
+    TempStr s = str::DupTemp(name);
+    for (int i = 0; i < len(s); i++) {
+        char c = s.s[i];
+        if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' ||
+            c == '|') {
+            s.s[i] = '_';
+        }
+    }
+    return s;
+}
+
+// RFC-4180: quote a field if it contains comma, quote or newline; double quotes
+static void AppendCsvField(str::Builder& b, Str s, bool last = false) {
+    bool needsQuotes = false;
+    for (int i = 0; i < s.len; i++) {
+        char c = s.s[i];
+        if (c == ',' || c == '"' || c == '\n' || c == '\r') {
+            needsQuotes = true;
+            break;
+        }
+    }
+    if (needsQuotes) {
+        b.AppendChar('"');
+        for (int i = 0; i < s.len; i++) {
+            if (s.s[i] == '"') {
+                b.AppendChar('"');
+            }
+            b.AppendChar(s.s[i]);
+        }
+        b.AppendChar('"');
+    } else {
+        b.Append(s);
+    }
+    b.Append(last ? StrL("\r\n") : StrL(","));
+}
+
+// parses RFC-4180 csv; each record becomes a StrVec of fields (caller deletes)
+static void ParseCsv(Str data, Vec<StrVec*>& rows) {
+    StrVec* row = nullptr;
+    str::Builder field;
+    bool inQuotes = false;
+    int i = 0;
+    auto endField = [&]() {
+        if (!row) {
+            row = new StrVec();
+        }
+        Str s = field.TakeStr();
+        row->Append(len(s) > 0 ? s : StrL(""));
+        str::Free(s);
+    };
+    auto endRow = [&]() {
+        endField();
+        rows.Append(row);
+        row = nullptr;
+    };
+    while (i < data.len) {
+        char c = data.s[i];
+        if (inQuotes) {
+            if (c == '"') {
+                if (i + 1 < data.len && data.s[i + 1] == '"') {
+                    field.AppendChar('"');
+                    i += 2;
+                } else {
+                    inQuotes = false;
+                    i++;
+                }
+            } else {
+                field.AppendChar(c);
+                i++;
+            }
+            continue;
+        }
+        if (c == '"') {
+            inQuotes = true;
+            i++;
+        } else if (c == ',') {
+            endField();
+            i++;
+        } else if (c == '\r' || c == '\n') {
+            if (c == '\r' && i + 1 < data.len && data.s[i + 1] == '\n') {
+                i++;
+            }
+            i++;
+            endRow();
+        } else {
+            field.AppendChar(c);
+            i++;
+        }
+    }
+    // last record without trailing newline
+    if (row || !field.IsEmpty()) {
+        endRow();
+    }
+}
+
+// a component designator is 1-3 uppercase letters followed by 1-4 digits
+// (R12, U5, TP3, FB101) - full match only
+static bool IsDesignator(Str w) {
+    int i = 0, nLetters = 0, nDigits = 0;
+    while (i < w.len && w.s[i] >= 'A' && w.s[i] <= 'Z') {
+        i++;
+        nLetters++;
+    }
+    while (i < w.len && w.s[i] >= '0' && w.s[i] <= '9') {
+        i++;
+        nDigits++;
+    }
+    return i == w.len && nLetters >= 1 && nLetters <= 3 && nDigits >= 1 && nDigits <= 4;
+}
+
+// one pass over the page's glyphs: finds the designator word nearest to pt and
+// the word whose rect contains pt (same codepoint/coords walk as GetTextInRegion)
+static void ScanWordsNearPoint(EngineBase* engine, int pageNo, PointF pt, TempStr* designatorOut,
+                               TempStr* clickedOut) {
+    int textLen = 0;
+    Rect* coords = nullptr;
+    Str pageText = engine->GetTextForPage(pageNo, &textLen, &coords);
+    if (!pageText || !coords) {
+        return;
+    }
+    float bestDist = 0;
+    int byteIdx = 0;
+    int i = 0;
+    while (i < textLen) {
+        int wordStartByte = byteIdx;
+        int wordEndByte = byteIdx;
+        RectF wordRect{};
+        bool haveWord = false;
+        while (i < textLen) {
+            int c = Utf8CodepointNext(pageText, byteIdx);
+            if (!isWordChar(c)) {
+                if (!haveWord) {
+                    // skip leading non-word char and restart the word
+                    wordStartByte = byteIdx;
+                    wordEndByte = byteIdx;
+                    i++;
+                    continue;
+                }
+                i++;
+                break;
+            }
+            RectF gr = ToRectF(coords[i]);
+            wordRect = haveWord ? wordRect.Union(gr) : gr;
+            haveWord = true;
+            wordEndByte = byteIdx;
+            i++;
+        }
+        if (!haveWord) {
+            continue;
+        }
+        Str word(pageText.s + wordStartByte, wordEndByte - wordStartByte);
+        if (clickedOut && !*clickedOut && wordRect.Contains(pt)) {
+            *clickedOut = str::DupTemp(word);
+        }
+        if (designatorOut && IsDesignator(word)) {
+            float cx = wordRect.x + wordRect.dx / 2 - pt.x;
+            float cy = wordRect.y + wordRect.dy / 2 - pt.y;
+            float dist = cx * cx + cy * cy;
+            if (!*designatorOut || dist < bestDist) {
+                bestDist = dist;
+                *designatorOut = str::DupTemp(word);
+            }
+        }
+    }
+}
+
+// heuristic: the sheet title lives in the title block, bottom-right of the
+// page; take the longest line of text in that region
+static TempStr SheetTitleTemp(DisplayModel* dm, int pageNo) {
+    RectF mb = dm->GetEngine()->PageMediabox(pageNo);
+    RectF region{mb.x + mb.dx * 0.60f, mb.y + mb.dy * 0.85f, mb.dx * 0.40f, mb.dy * 0.15f};
+    Str txt = dm->GetTextInRegion(pageNo, region);
+    if (!txt) {
+        return {};
+    }
+    TempStr best = {};
+    StrVec lines;
+    Split(&lines, txt, StrL("\r\n"), true);
+    for (Str line : lines) {
+        TempStr l = str::DupTemp(line);
+        str::TrimWSInPlace(l, str::TrimOpt::Both);
+        if (len(l) > len(best)) {
+            best = l;
+        }
+    }
+    str::Free(txt);
+    return best;
+}
+
+static TempStr FmtTimeTemp(time_t t) {
+    if (t == 0) {
+        t = time(nullptr);
+    }
+    struct tm tm;
+    if (localtime_s(&tm, &t) != 0) {
+        return {};
+    }
+    char buf[32]{};
+    strftime(buf, sizeof(buf) - 1, "%Y-%m-%d %H:%M", &tm);
+    return str::DupTemp(Str(buf));
+}
+
+static void ShowReviewNotification(MainWindow* win, TempStr msg, bool warning) {
+    NotificationCreateArgs nargs;
+    nargs.hwndParent = win->hwndCanvas;
+    nargs.timeoutMs = warning ? 5000 : 3000;
+    nargs.warning = warning;
+    nargs.msg = msg;
+    ShowNotification(nargs);
+}
+
+// merge every reviewer's csv into ALL-comments.csv (single header, sorted
+// file order so the result is deterministic)
+static void RebuildAllCommentsCsv(Str reviewDir) {
+    StrVec files;
+    DirIter di{reviewDir};
+    for (DirIterEntry* de : di) {
+        if (!str::EndsWithI(de->name, StrL(".csv")) || str::EqI(de->name, StrL(kAllCommentsName))) {
+            continue;
+        }
+        files.Append(de->filePath);
+    }
+    Sort(&files);
+    str::Builder all;
+    all.Append(StrL(kReviewCsvHeader));
+    for (Str f : files) {
+        Str content = file::ReadFile(f);
+        if (!content) {
+            continue;
+        }
+        // skip this file's header line
+        int skip = 0;
+        while (skip < content.len && content.s[skip] != '\n') {
+            skip++;
+        }
+        if (skip < content.len) {
+            skip++;
+            all.Append(Str(content.s + skip, content.len - skip));
+            if (all.LastChar() != '\n') {
+                all.Append(StrL("\r\n"));
+            }
+        }
+        str::Free(content);
+    }
+    Str data = all.TakeStr();
+    file::WriteFile(path::JoinTemp(reviewDir, StrL(kAllCommentsName)), data);
+    str::Free(data);
+}
+
+void PublishReviewComments(MainWindow* win, WindowTab* tab) {
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        return;
+    }
+    Str me = AnnotationAuthorNameTemp();
+    if (len(me) == 0) {
+        me = StrL("user");
+    }
+    TempStr rev = path::GetBaseNameTemp(tab->filePath);
+
+    Vec<Annotation*> annots;
+    EngineGetAnnotations(engine, annots);
+
+    str::Builder csv;
+    csv.Append(StrL(kReviewCsvHeader));
+    int n = 0;
+    for (Annotation* annot : annots) {
+        AnnotationType tp = Type(annot);
+        if (tp != AnnotationType::Text && tp != AnnotationType::FreeText) {
+            continue;
+        }
+        Str contents = Contents(annot);
+        if (str::StartsWith(contents, StrL(kReviewImportMarker))) {
+            continue; // never republish someone else's imported comments
+        }
+        Str author = Author(annot);
+        if (len(author) > 0 && !str::EqI(author, me)) {
+            continue; // only publish own comments
+        }
+        if (str::IsEmptyOrWhiteSpace(contents)) {
+            continue; // empty note: nothing to review
+        }
+        int pageNo = PageNo(annot);
+        RectF r = GetRect(annot);
+        PointF pt{r.x, r.y};
+        TempStr designator = {};
+        TempStr clicked = {};
+        ScanWordsNearPoint(engine, pageNo, pt, &designator, &clicked);
+        AppendCsvField(csv, rev);
+        AppendCsvField(csv, fmt("%d", pageNo));
+        AppendCsvField(csv, SheetTitleTemp(dm, pageNo));
+        AppendCsvField(csv, designator);
+        AppendCsvField(csv, clicked);
+        AppendCsvField(csv, contents);
+        AppendCsvField(csv, me);
+        AppendCsvField(csv, FmtTimeTemp(ModificationDate(annot)));
+        AppendCsvField(csv, fmt("%.2f", pt.x));
+        AppendCsvField(csv, fmt("%.2f", pt.y), true);
+        n++;
+    }
+
+    TempStr reviewDir = ReviewDirTemp(tab);
+    if (!dir::Exists(reviewDir) && !dir::CreateAll(reviewDir)) {
+        ShowReviewNotification(win, fmt(_TRA("Couldn't create folder %s").s, reviewDir), true);
+        return;
+    }
+    TempStr fileName = fmt("%s.csv", SanitizeFileNameTemp(me));
+    TempStr myCsvPath = path::JoinTemp(reviewDir, fileName);
+    Str data = csv.TakeStr();
+    bool ok = file::WriteFile(myCsvPath, data);
+    str::Free(data);
+    if (!ok) {
+        ShowReviewNotification(win, fmt(_TRA("Couldn't write %s").s, myCsvPath), true);
+        return;
+    }
+    RebuildAllCommentsCsv(reviewDir);
+    ShowReviewNotification(win, fmt(_TRA("Published %d review comments to %s").s, n, reviewDir), false);
+}
+
+void ImportReviewComments(MainWindow* win, WindowTab* tab) {
+    DisplayModel* dm = tab ? tab->AsFixed() : nullptr;
+    EngineBase* engine = dm ? dm->GetEngine() : nullptr;
+    if (!engine || !EngineSupportsAnnotations(engine)) {
+        return;
+    }
+
+    // idempotency: remove notes created by a previous import
+    Vec<Annotation*> annots;
+    EngineGetAnnotations(engine, annots);
+    for (Annotation* annot : annots) {
+        if (Type(annot) == AnnotationType::Text && str::StartsWith(Contents(annot), StrL(kReviewImportMarker))) {
+            DeleteAnnotationAndUpdateUI(tab, annot);
+        }
+    }
+    ClearImportedReviewComments(tab);
+
+    Str me = AnnotationAuthorNameTemp();
+    if (len(me) == 0) {
+        me = StrL("user");
+    }
+    TempStr myCsvName = fmt("%s.csv", SanitizeFileNameTemp(me));
+    TempStr reviewDir = ReviewDirTemp(tab);
+    int nComments = 0;
+    int nReviewers = 0;
+    int nPages = dm->PageCount();
+    DirIter di{reviewDir};
+    for (DirIterEntry* de : di) {
+        if (!str::EndsWithI(de->name, StrL(".csv")) || str::EqI(de->name, StrL(kAllCommentsName)) ||
+            str::EqI(de->name, myCsvName)) {
+            continue;
+        }
+        Str data = file::ReadFile(de->filePath);
+        if (!data) {
+            continue;
+        }
+        Vec<StrVec*> rows;
+        ParseCsv(data, rows);
+        bool any = false;
+        for (int rowIdx = 1; rowIdx < len(rows); rowIdx++) { // row 0 = header
+            StrVec* row = rows[rowIdx];
+            if (len(*row) < 10) {
+                continue;
+            }
+            int pageNo = atoi(CStrTemp(row->At(1)));
+            if (pageNo < 1 || pageNo > nPages) {
+                continue;
+            }
+            Str reviewer = row->At(6);
+            Str comment = row->At(5);
+            float x = (float)atof(CStrTemp(row->At(8)));
+            float y = (float)atof(CStrTemp(row->At(9)));
+            AnnotCreateArgs args{AnnotationType::Text};
+            Annotation* annot = EngineMupdfCreateAnnotation(engine, pageNo, PointF{x, y}, &args);
+            if (!annot) {
+                continue;
+            }
+            SetContents(annot, fmt("%s[%s] %s", StrL(kReviewImportMarker), reviewer, comment));
+            SetAuthor(annot, reviewer);
+            auto rci = new ReviewCommentInfo();
+            rci->annot = annot;
+            rci->tab = tab;
+            rci->imported = true;
+            rci->page = pageNo;
+            rci->x = x;
+            rci->y = y;
+            rci->rev = str::Dup(row->At(0));
+            rci->sheet = str::Dup(row->At(2));
+            rci->component = str::Dup(row->At(3));
+            rci->clicked = str::Dup(row->At(4));
+            rci->comment = str::Dup(comment);
+            rci->reviewer = str::Dup(reviewer);
+            rci->date = str::Dup(row->At(7));
+            gImportedReviewComments.Append(rci);
+            nComments++;
+            any = true;
+        }
+        DeleteVecMembers(rows);
+        str::Free(data);
+        if (any) {
+            nReviewers++;
+        }
+    }
+    UpdateAnnotationsList(tab->editAnnotsWindow);
+    MainWindowRerender(win);
+    if (nComments == 0) {
+        ShowReviewNotification(win, fmt(_TRA("No review comments found in %s").s, reviewDir), true);
+    } else {
+        ShowReviewNotification(
+            win, fmt(_TRA("Imported %d review comments from %d reviewers (overlay: not saved into the PDF)").s,
+                     nComments, nReviewers),
+            false);
+    }
 }

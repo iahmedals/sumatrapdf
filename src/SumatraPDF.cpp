@@ -7628,6 +7628,16 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
         }
 
+        // smartpdf review mode
+        case CmdPublishReviewComments: {
+            PublishReviewComments(win, tab);
+            break;
+        }
+        case CmdImportReviewComments: {
+            ImportReviewComments(win, tab);
+            break;
+        }
+
         case CmdReadAloud: {
             if (!tab) {
                 break;
