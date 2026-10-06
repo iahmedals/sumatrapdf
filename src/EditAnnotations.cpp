@@ -8,7 +8,6 @@ extern "C" {
 #include "base/Base.h"
 #include "base/File.h"
 #include "base/DirIter.h"
-#include "base/StrUtf8.h"
 #include "base/UITask.h"
 #include "base/Dpi.h"
 #include "base/Win.h"
@@ -20,6 +19,7 @@ extern "C" {
 
 #include "Settings.h"
 #include "AppSettings.h"
+#include "GlobalPrefs.h"
 #include "DocController.h"
 #include "Annotation.h"
 #include "EngineBase.h"
@@ -2266,7 +2266,7 @@ static void UpdateReviewDetails(MainWindow* win) {
         win->reviewDetails->SetText(StrL(""));
         return;
     }
-    ReviewCommentInfo* rci = win->reviewItems->At(idx);
+    ReviewCommentInfo* rci = (*win->reviewItems)[idx];
     str::Builder b;
     b.Append(fmt("%s: %s\r\n", _TRA("Reviewer"), rci->reviewer));
     b.Append(fmt("%s: %d\r\n", _TRA("Page"), rci->page));
@@ -2296,7 +2296,7 @@ static void DrawReviewCard(MainWindow* win, ListBox::DrawItemEvent* ev) {
     if (!win->reviewItems || ev->itemIndex < 0 || ev->itemIndex >= len(*win->reviewItems)) {
         return;
     }
-    ReviewCommentInfo* rci = win->reviewItems->At(ev->itemIndex);
+    ReviewCommentInfo* rci = (*win->reviewItems)[ev->itemIndex];
     ListBox* lb = ev->listBox;
     HDC hdc = ev->hdc;
     RECT rc = ev->itemRect;
@@ -2404,7 +2404,7 @@ static void OnReviewCardSelected(MainWindow* win) {
     if (!win->reviewItems || idx < 0 || idx >= len(*win->reviewItems)) {
         return;
     }
-    ReviewCommentInfo* rci = win->reviewItems->At(idx);
+    ReviewCommentInfo* rci = (*win->reviewItems)[idx];
     // defer navigation so the list can repaint first; capture by value, the
     // annotation pointer might not survive until the task runs
     auto d = new ReviewGoToData;
@@ -2482,7 +2482,7 @@ void RebuildReviewPanel(MainWindow* win) {
             }
             // insert sorted by page
             int pos = 0;
-            while (pos < len(*win->reviewItems) && win->reviewItems->At(pos)->page <= rci->page) {
+            while (pos < len(*win->reviewItems) && (*win->reviewItems)[pos]->page <= rci->page) {
                 pos++;
             }
             win->reviewItems->InsertAt(pos, rci);
@@ -2491,7 +2491,7 @@ void RebuildReviewPanel(MainWindow* win) {
     // the model only drives the item count; cards are owner-drawn
     auto model = new ListBoxModelStrings();
     for (int i = 0; i < len(*win->reviewItems); i++) {
-        model->strings.Append(win->reviewItems->At(i)->comment);
+        model->strings.Append((*win->reviewItems)[i]->comment);
     }
     win->reviewListBox->SetModel(model);
     if (win->reviewLabelWithClose) {
