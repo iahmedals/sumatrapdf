@@ -264,6 +264,9 @@ enum {
     CmdCommandPaletteFavorites = 453,
     CmdNavigateFilesInFolder = 454,
     CmdNone = 455,
+    CmdPublishReviewComments = 456,
+    CmdImportReviewComments = 457,
+    CmdToggleReviewPanel = 458,
 
     /* range for file history */
     CmdFileHistoryFirst,

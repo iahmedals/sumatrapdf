@@ -8627,6 +8627,11 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             SetAnnotCreateArgs(args, cmd);
             lastCreatedAnnot = EngineMupdfCreateAnnotation(engine, pageNoUnderCursor, ptOnPage, &args);
             openAnnotationEdit = GetCommandBoolArg(cmd, kCmdArgOpenEdit, false);
+            // smartpdf review mode: a sticky note is useless without text,
+            // always open the editor right away
+            if (annotType == AnnotationType::Text) {
+                openAnnotationEdit = true;
+            }
         } break;
 
         case CmdCreateAnnotImageFromClipboard: {
@@ -8696,6 +8701,10 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         focusTarget = EditAnnotFocus::Edit;
     } else if (GetCommandBoolArg(cmd, kCmdArgFocusList, false)) {
         focusTarget = EditAnnotFocus::List;
+    }
+    // smartpdf review mode: put the cursor straight into the Contents box
+    if (focusTarget == EditAnnotFocus::Default && lastCreatedAnnot->type == AnnotationType::Text) {
+        focusTarget = EditAnnotFocus::Edit;
     }
 
     if (openAnnotationEdit) {

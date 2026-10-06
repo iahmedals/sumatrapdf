@@ -595,6 +595,37 @@ bool SetContents(Annotation* annot, Str sv) {
     return true;
 }
 
+// smartpdf review mode: imported review notes carry the original reviewer's
+// name, which creation always overwrites with the current user, so we need a
+// way to set the author after the fact (modeled on SetContents)
+bool SetAuthor(Annotation* annot, Str author) {
+    ReportIf(!annot);
+    if (!annot) {
+        return false;
+    }
+    EngineMupdf* e = annot->engine;
+    auto a = annot->pdfannot;
+    TempStr valueZ = str::DupTemp(author);
+    bool ok = true;
+    {
+        auto ctx = e->Ctx();
+        ScopedRecursiveMutex cs(&e->docLock);
+        fz_try(ctx) {
+            if (pdf_annot_has_author(ctx, a)) {
+                pdf_set_annot_author(ctx, a, len(valueZ) == 0 ? "" : valueZ.s);
+            } else {
+                ok = false;
+            }
+        }
+        fz_catch(ctx) {
+            fz_report_error(ctx);
+            ok = false;
+        }
+    }
+    MarkNotificationAsModified(e, annot);
+    return ok;
+}
+
 static bool IsAnnotationInEngine(EngineMupdf* e, Annotation* annot) {
     int pageNo = annot->pageNo;
     int pageIdx = pageNo - 1;
@@ -1192,6 +1223,19 @@ static Str GetUserTemp() {
     return u;
 }
 
+// the name used as the author of annotations this user creates:
+// the defaultAuthor pref, or the OS user name; empty if disabled via "(none)"
+Str AnnotationAuthorNameTemp() {
+    Str defAuthor = gGlobalPrefs->annotations.defaultAuthor;
+    if (str::Eq(defAuthor, "(none)")) {
+        return {};
+    }
+    if (!str::IsEmptyOrWhiteSpace(defAuthor)) {
+        return str::DupTemp(defAuthor);
+    }
+    return GetUserTemp();
+}
+
 static TempStr GetAnnotationTextIconTemp() {
     TempStr s = str::DupTemp(gGlobalPrefs->annotations.textIconType);
     // this way user can use "new paragraph" and we'll match "NewParagraph"
@@ -1293,13 +1337,8 @@ Annotation* EngineMupdfCreateAnnotation(EngineBase* engine, int pageNo, PointF p
 
             pdf_set_annot_modification_date(ctx, annot, time(nullptr));
             if (pdf_annot_has_author(ctx, annot)) {
-                Str defAuthor = gGlobalPrefs->annotations.defaultAuthor;
-                // if "(none)" we don't set it
-                if (!str::Eq(defAuthor, "(none)")) {
-                    Str author = GetUserTemp();
-                    if (!str::IsEmptyOrWhiteSpace(defAuthor)) {
-                        author = defAuthor;
-                    }
+                Str author = AnnotationAuthorNameTemp();
+                if (len(author) > 0) {
                     pdf_set_annot_author(ctx, annot, CStrTemp(author));
                 }
             }

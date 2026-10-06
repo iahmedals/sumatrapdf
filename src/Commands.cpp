@@ -267,6 +267,9 @@ static SeqStrings gCommandNames =
     "CmdCommandPaletteFavorites\0"
     "CmdNavigateFilesInFolder\0"
     "CmdNone\0"
+    "CmdPublishReviewComments\0"
+    "CmdImportReviewComments\0"
+    "CmdToggleReviewPanel\0"
     "\0";
 
 static i32 gCommandIds[] = {
@@ -525,6 +528,9 @@ static i32 gCommandIds[] = {
     CmdCommandPaletteFavorites,
     CmdNavigateFilesInFolder,
     CmdNone,
+    CmdPublishReviewComments,
+    CmdImportReviewComments,
+    CmdToggleReviewPanel,
 };
 
 SeqStrings gCommandDescriptions =
@@ -783,6 +789,9 @@ SeqStrings gCommandDescriptions =
     "Command Palette: Favorites\0"
     "Navigate Files in Folder\0"
     "Do nothing\0"
+    "Publish Review Comments\0"
+    "Import Review Comments\0"
+    "Toggle Review Comments Panel\0"
     "\0";
 // clang-format on
 // @gen-end cmd-c

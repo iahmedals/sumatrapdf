@@ -119,6 +119,7 @@ void SetDefaultAppearanceTextFont(Annotation*, Str);
 void SetDefaultAppearanceTextSize(Annotation*, int);
 void SetDefaultAppearanceTextColor(Annotation*, PdfColor);
 bool SetContents(Annotation*, Str);
+bool SetAuthor(Annotation*, Str);
 bool SetColor(Annotation*, PdfColor);
 bool SetInteriorColor(Annotation*, PdfColor);
 bool SetQuadding(Annotation*, int);
@@ -166,3 +167,6 @@ bool AnnotationSupportsBorder(AnnotationType);
 bool AnnotationSupportsInteriorColor(AnnotationType);
 
 AnnotationType CmdIdToAnnotationType(int cmdId);
+
+// the author name the current user's new annotations get; "" if disabled
+Str AnnotationAuthorNameTemp();

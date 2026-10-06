@@ -259,6 +259,9 @@ export const commands = [
     "CmdCommandPaletteFavorites", "Command Palette: Favorites",
     "CmdNavigateFilesInFolder", "Navigate Files in Folder",
     "CmdNone", "Do nothing",
+    "CmdPublishReviewComments", "Publish Review Comments",
+    "CmdImportReviewComments", "Import Review Comments",
+    "CmdToggleReviewPanel", "Toggle Review Comments Panel",
 ];
 
 function getNames(): string[] {
