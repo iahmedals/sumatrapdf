@@ -1554,7 +1554,10 @@ void ReviewPaint(MainWindow* win, HDC hdc) {
         }
         g.DrawPath(&border, &path);
         Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 255, 255, 255));
-        g.DrawString(labelW, cch, &font, pill, &sf, &textBrush);
+        // white on yellow is hard to read
+        bool darkText = isOpen && c->severity == ReviewSeverity::Minor;
+        Gdiplus::SolidBrush labelBrush(darkText ? Gdiplus::Color(255, 0x1F, 0x23, 0x28) : Gdiplus::Color(255, 255, 255, 255));
+        g.DrawString(labelW, cch, &font, pill, &sf, &labelBrush);
 
         // amber badge: position needs checking on this revision
         if (c->anchorState == ReviewAnchorState::Moved) {
@@ -1698,17 +1701,35 @@ bool ReviewOnLeftButtonDown(MainWindow* win, int x, int y) {
 
 // --- selection and navigation ---
 
+// brings the comment into view, centered; doesn't move if it's already fully visible
 static void ScrollToComment(MainWindow* win, ReviewComment* c) {
-    if (!win->ctrl || c->curPage < 1) {
+    DisplayModel* dm = win->AsFixed();
+    if (!dm || c->curPage < 1 || c->curPage > dm->PageCount()) {
         return;
     }
     RectF r = c->curRect;
     if (!c->IsBox()) {
-        r = RectF(r.x - 60, r.y - 60, 120, 120);
-    } else {
-        r.Inflate(30, 30);
+        r = RectF(r.x - 40, r.y - 40, 80, 80);
     }
-    win->ctrl->ScrollTo(c->curPage, r, 0);
+    if (!dm->PageVisible(c->curPage)) {
+        dm->GoToPage(c->curPage, 0, true); // also a point to come back to with Alt+Left
+    }
+    Rect view = dm->GetViewPort();
+    Rect rc = dm->CvtToScreen(c->curPage, r);
+    bool inside = rc.x >= 0 && rc.y >= 0 && rc.x + rc.dx <= view.dx && rc.y + rc.dy <= view.dy;
+    if (inside) {
+        return;
+    }
+    int dy = rc.y + rc.dy / 2 - view.dy / 2;
+    if (dy != 0) {
+        dm->ScrollYBy(dy, false);
+    }
+    if (rc.x < 0 || rc.x + rc.dx > view.dx) {
+        int dx = rc.x + rc.dx / 2 - view.dx / 2;
+        if (dx != 0) {
+            dm->ScrollXBy(dx);
+        }
+    }
 }
 
 static void SelectComment(MainWindow* win, ReviewSession* s, Str key, bool scroll) {
@@ -2272,7 +2293,9 @@ void ReviewComposer::Paint(HDC hdcWnd) {
         float radius = (float)r.dy / 2;
         if (sel) {
             FillRoundRect(g, r, radius, GdipColor(sc));
-            GdipDrawText(g, ReviewSeverityName((ReviewSeverity)i), &bold, r, Gdiplus::Color(255, 255, 255, 255),
+            Gdiplus::Color onSev = i == (int)ReviewSeverity::Minor ? Gdiplus::Color(255, 0x1F, 0x23, 0x28)
+                                                                   : Gdiplus::Color(255, 255, 255, 255);
+            GdipDrawText(g, ReviewSeverityName((ReviewSeverity)i), &bold, r, onSev,
                      Gdiplus::StringAlignmentCenter);
         } else {
             if (hot == kHitSev0 + i) {
