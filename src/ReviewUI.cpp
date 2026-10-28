@@ -52,6 +52,7 @@ connects it to the viewer:
 #include "Translations.h"
 #include "Theme.h"
 #include "resource.h"
+#include "Commands.h"
 
 #include "Review.h"
 #include "ReviewXlsx.h"
@@ -2594,6 +2595,7 @@ static void OpenComposer(MainWindow* win, ReviewSession* s, int page, PointF pt,
     CreateCustomArgs args;
     args.visible = false;
     args.title = c->title;
+    args.pos = Rect(0, 0, 430, 300); // moved and sized below
     args.style = WS_POPUP | WS_BORDER | WS_CLIPCHILDREN;
     args.exStyle = WS_EX_TOOLWINDOW;
     args.isRtl = IsUIRtl();
@@ -2671,7 +2673,15 @@ void ReviewAddComment(MainWindow* win, Point canvasPt, bool hasPt) {
         ScheduleRepaint(win, 0);
     } else {
         Point p = hasPt ? canvasPt : HwndGetCursorPos(win->hwndCanvas);
-        page = dm->GetPageNoByPoint(p);
+        bool onCanvas = ClientRect(win->hwndCanvas).Contains(p);
+        page = onCanvas ? dm->GetPageNoByPoint(p) : -1;
+        if (page < 1 && !hasPt) {
+            // from the menu bar or the panel: the next click on the page says where
+            SetStr(&s->placingKey, StrL(kPlaceNewComment));
+            ShowReviewToast(win, _TRA("Click on the schematic where the comment goes (Esc cancels)"), false, 6000);
+            PanelUpdate(win);
+            return;
+        }
         if (page < 1) {
             page = dm->CurrentPageNo();
             RectF mb = s->engine->PageMediabox(page);
@@ -3984,6 +3994,19 @@ static void CreateFallbackControls(MainWindow* win) {
     }
 }
 
+static int ResolvePanelAccel(void*, u16 vk, bool ctrl, bool shift, bool alt) {
+    if (ctrl && shift && !alt && vk == 'R') {
+        return CmdToggleReviewPanel;
+    }
+    if (ctrl && shift && !alt && vk == 'M') {
+        return CmdAddReviewComment;
+    }
+    if (!ctrl && !shift && !alt && vk == VK_F7) {
+        return CmdToggleReviewMode;
+    }
+    return 0;
+}
+
 static void CreateReviewPanel(MainWindow* win) {
     if (win->hwndReviewBox) {
         return;
@@ -4014,7 +4037,11 @@ static void CreateReviewPanel(MainWindow* win) {
         auto wv = new ReviewWebView();
         wv->win = win;
         wv->dataDir = str::Dup(GetWebViewDataDirTemp());
+        wstr::Free(wv->resourceUriPrefix);
         wv->resourceUriPrefix = wstr::Dup(WStr(L"https://smartpdf.review/"));
+        // the review shortcuts keep working while typing in the panel
+        wv->events.ctx = win;
+        wv->events.resolveAccelCmd = ResolvePanelAccel;
         wv->resourceProvider.ctx = win;
         wv->resourceProvider.getResource = GetPanelResource;
         wv->allowExternalDrop = false;

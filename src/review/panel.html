@@ -81,6 +81,8 @@ kbd {
 :root.dark .btn.primary { color: #0b1220; }
 .btn.primary:hover { filter: brightness(1.07); }
 .btn.danger { color: var(--bad); }
+.btn.armed { background: var(--bad); border-color: transparent; color: #fff; font-weight: 600; }
+.btn.armed:hover { background: var(--bad); filter: brightness(1.08); }
 .btn.small { padding: 3px 8px; font-size: 12px; }
 .btn[disabled] { opacity: .5; cursor: default; }
 .icon {
@@ -367,6 +369,8 @@ details.hist li b { color: var(--fg); font-weight: 600; }
   var mention = null; // {key, start, query, hot, items}
   var renderQueued = false;
   var toastTimer = 0;
+  var armed = '';    // action waiting for its confirming second click
+  var armedTimer = 0;
 
   // ---------- host bridge ----------
 
@@ -986,7 +990,9 @@ details.hist li b { color: var(--fg); font-weight: 600; }
     }
     h += '<button class="btn small" data-act="movepin" data-key="' + esc(c.key) + '" title="Click on the page to put the pin somewhere else">' + svg('pin') + 'Move pin</button>';
     if (c.mine) {
-      h += '<button class="btn small danger" data-act="del" data-key="' + esc(c.key) + '">' + svg('trash') + 'Delete</button>';
+      var armedDel = armed === 'del:' + c.key;
+      h += '<button class="btn small danger' + (armedDel ? ' armed' : '') + '" data-act="del" data-key="' + esc(c.key) + '">' +
+        svg('trash') + (armedDel ? 'Click again to delete' : 'Delete') + '</button>';
     }
     h += '</div>';
     if (c.agrees.length) {
@@ -1175,7 +1181,9 @@ details.hist li b { color: var(--fg); font-weight: 600; }
 
     h += '<div class="section"><h3>Review round <span class="pill-round">Round ' + S.round + '</span></h3>' +
       '<p>Start a new round when a new PDF revision is out. Comments are tagged with their round so you can see what\u2019s new.</p>' +
-      '<button class="btn small" data-act="round">Start round ' + (S.round + 1) + '</button></div>';
+      '<button class="btn small' + (armed === 'round' ? ' armed' : '') + '" data-act="round">' +
+      (armed === 'round' ? 'Click again: start round ' + (S.round + 1) + ' for everyone' : 'Start round ' + (S.round + 1)) +
+      '</button></div>';
 
     h += '<div class="section"><h3>Reviewers &amp; sheet assignments</h3><p>Split the sheets between reviewers: everyone sees \u201cMy sheets\u201d.</p>' +
       teamRows(true) + '</div>';
@@ -1266,7 +1274,8 @@ details.hist li b { color: var(--fg); font-weight: 600; }
       case 'edit': send({ cmd: 'edit', key: key }); break;
       case 'movepin': send({ cmd: 'move', key: key }); break;
       case 'del':
-        if (c && window.confirm('Delete ' + c.id + '? This can\u2019t be undone.')) { send({ cmd: 'delete', key: key }); }
+        // WebView2 dialogs are off in the viewer: confirm with a second click instead
+        if (c && confirmClick('del:' + key)) { send({ cmd: 'delete', key: key }); }
         break;
       case 'reply': sendReply(key); break;
       case 'mention': pickMention(+el.getAttribute('data-i')); break;
@@ -1303,7 +1312,7 @@ details.hist li b { color: var(--fg); font-weight: 600; }
       }
       case 'designer': send({ cmd: 'config', key: 'designer', val: me().id }); break;
       case 'round':
-        if (window.confirm('Start review round ' + (S.round + 1) + ' for everyone?')) {
+        if (confirmClick('round')) {
           send({ cmd: 'config', key: 'round', val: String(S.round + 1) });
         }
         break;
@@ -1337,6 +1346,21 @@ details.hist li b { color: var(--fg); font-weight: 600; }
       case 'stopcompare': menuOpen = false; send({ cmd: 'compare', path: '' }); scheduleRender(); break;
       case 'resolvedpins': menuOpen = false; send({ cmd: 'showResolved', on: !S.showResolved }); scheduleRender(); break;
     }
+  }
+
+  // first click arms the action (the button asks to click again), second click does it
+  function confirmClick(id) {
+    if (armed === id) {
+      armed = '';
+      clearTimeout(armedTimer);
+      scheduleRender();
+      return true;
+    }
+    armed = id;
+    clearTimeout(armedTimer);
+    armedTimer = setTimeout(function () { armed = ''; scheduleRender(); }, 4000);
+    scheduleRender();
+    return false;
   }
 
   function cleanLines(t) {
