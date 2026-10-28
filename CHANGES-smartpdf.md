@@ -174,6 +174,12 @@ passed to Windows — no protocol handlers, no registry entries. Every other kin
   ALL-comments.csv central sheet, Review Comments panel with clickable cards,
   revision-proof review folder; smartify --nets/--bom knowledge files.
 
+- **v0.4.0** — commit `2bb9018`: the review tool: severity comments from the right-click
+  menu, pins on the page, review panel (filters, statuses, replies, @mentions, +1,
+  sheets, checklist, sign-off, team settings), live team review through a OneDrive-synced
+  SharePoint folder, Excel report, snapshots, keyboard review mode, comments re-found on
+  new revisions, revision compare, net comments, export PDF with comments, review demo.
+
 (Tags exist in the local development clone; pushing tags is blocked in the build
 environment, so use the commit hashes above to check out a version.)
 
