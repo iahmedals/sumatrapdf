@@ -71,6 +71,7 @@ struct ReviewComment {
     ReviewStatus status = ReviewStatus::Open;
     Str text;
     Str rev;   // file name of the PDF revision the comment was made on
+    Str revId; // content fingerprint of that PDF (empty in old comments)
     int page = 0;
     RectF rect;      // point comment: dx == dy == 0, else box (page coordinates)
     Str shape;       // "pin", "box", "ellipse", "highlight"

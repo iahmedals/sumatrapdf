@@ -17,6 +17,7 @@ connects it to the viewer:
 #include "base/Dpi.h"
 #include "base/File.h"
 #include "base/DirIter.h"
+#include "base/Crypto.h"
 #include "base/GuessFileType.h"
 #include "base/UITask.h"
 #include "base/Win.h"
@@ -169,6 +170,8 @@ struct ReviewSession {
     int pageCount = 0;
     Str pdfPath;
     Str pdfName;
+    Str revId; // content fingerprint of the open PDF (computed in the background)
+    int docReloads = 0; // a fingerprint computed before a reload is stale
     Str pdfDir;
     Str reviewDir;
     Str myLogPath;
@@ -223,6 +226,7 @@ ReviewSession::~ReviewSession() {
     DeleteVecMembers(resolved);
     str::Free(pdfPath);
     str::Free(pdfName);
+    str::Free(revId);
     str::Free(pdfDir);
     str::Free(reviewDir);
     str::Free(myLogPath);
@@ -337,6 +341,25 @@ static bool EnsureReviewDir(MainWindow* win, ReviewSession* s) {
 // that another reviewer just wrote may have to be downloaded first.
 
 static void ApplyResolutions(ReviewSession* s, bool* needsWorkOut);
+
+// content fingerprint of a PDF: tells revisions apart even when the designer
+// overwrites the file under the same name
+static TempStr ComputeRevIdTemp(Str pdfPath) {
+    Str data = file::ReadFile(pdfPath);
+    if (!data) {
+        return {};
+    }
+    u8 digest[16]{};
+    CalcMD5Digest(data, digest);
+    str::Free(data);
+    static const char* hex = "0123456789abcdef";
+    str::Builder b;
+    for (u8 v : digest) {
+        b.AppendChar(hex[v >> 4]);
+        b.AppendChar(hex[v & 15]);
+    }
+    return str::DupTemp(Str(b.els, (int)b.len));
+}
 
 static i64 ComputeSignature(Str reviewDir) {
     i64 sig = 0;
@@ -476,6 +499,9 @@ static TempStr MyLogPathForMigrationTemp(ReviewSession* s) {
 // synchronous load, when the complete model is needed right now (e.g. to number
 // a new comment) and the background load hasn't finished yet
 static void EnsureLoaded(ReviewSession* s) {
+    if (len(s->revId) == 0) {
+        SetStr(&s->revId, ComputeRevIdTemp(s->pdfPath));
+    }
     if (s->loadedOnce) {
         return;
     }
@@ -490,6 +516,9 @@ static void EnsureLoaded(ReviewSession* s) {
 struct ReviewLoadJob {
     MainWindow* win = nullptr;
     Str pdfPath; // identifies the session
+    bool needRevId = false;
+    int docReloads = 0;
+    Str revId;
     Str reviewDir;
     Str myId;
     Str myLogPath;
@@ -498,6 +527,7 @@ struct ReviewLoadJob {
     Vec<ReviewEvent*> events;
     ~ReviewLoadJob() {
         str::Free(pdfPath);
+        str::Free(revId);
         str::Free(reviewDir);
         str::Free(myId);
         str::Free(myLogPath);
@@ -508,6 +538,9 @@ struct ReviewLoadJob {
 static void LoadDone(ReviewLoadJob* job);
 
 static void LoadThread(ReviewLoadJob* job) {
+    if (job->needRevId) {
+        job->revId = str::Dup(ComputeRevIdTemp(job->pdfPath));
+    }
     // signature first: files that change while being read are noticed next time
     job->signature = ComputeSignature(job->reviewDir);
     ReadAllLogs(job->reviewDir, job->myId, job->myLogPath, job->events);
@@ -522,6 +555,8 @@ static void StartLoad(MainWindow* win, ReviewSession* s) {
     auto job = new ReviewLoadJob();
     job->win = win;
     job->pdfPath = str::Dup(s->pdfPath);
+    job->needRevId = len(s->revId) == 0;
+    job->docReloads = s->docReloads;
     job->reviewDir = str::Dup(s->reviewDir);
     job->myId = str::Dup(s->myId);
     job->myLogPath = str::Dup(MyLogPathForMigrationTemp(s));
@@ -605,12 +640,16 @@ static ReviewSession* GetSession(WindowTab* tab, bool create) {
         StartReviewTimers(tab->win);
     }
     if (s->engine != engine) {
-        // document was reloaded: positions and words must be recomputed
+        // document was reloaded (maybe overwritten by a new revision): positions,
+        // words and the content fingerprint must be recomputed
         s->engine = engine;
         s->pageCount = engine->PageCount();
         ClearPageCaches(s);
+        str::FreePtr(&s->revId);
+        s->docReloads++;
         bool needsWork = false;
         ApplyResolutions(s, &needsWork);
+        StartLoad(tab->win, s);
     }
     return s;
 }
@@ -662,12 +701,20 @@ static ReviewResolved* FindResolved(ReviewSession* s, Str key, Str rev) {
     return nullptr;
 }
 
+// was the comment made on the PDF that is open now?
+static bool IsSameRevision(ReviewSession* s, ReviewComment* c) {
+    if (len(c->revId) > 0 && len(s->revId) > 0) {
+        return str::EqI(c->revId, s->revId);
+    }
+    return len(c->rev) == 0 || str::EqI(c->rev, s->pdfName);
+}
+
 static void ApplyResolutions(ReviewSession* s, bool* needsWorkOut) {
     for (ReviewComment* c : s->model.comments) {
         if (c->deleted) {
             continue;
         }
-        if (len(c->rev) == 0 || str::EqI(c->rev, s->pdfName)) {
+        if (IsSameRevision(s, c)) {
             c->curPage = ClampPage(s, c->page);
             c->curRect = c->rect;
             c->anchorState = ReviewAnchorState::Same;
@@ -1165,6 +1212,9 @@ static void LoadDone(ReviewLoadJob* job) {
         return; // the tab was closed
     }
     s->loading = false;
+    if (len(s->revId) == 0 && len(job->revId) > 0 && job->docReloads == s->docReloads) {
+        SetStr(&s->revId, job->revId);
+    }
     bool outdated = job->appendCount != s->appendCount || !str::EqI(job->reviewDir, s->reviewDir);
     if (outdated || s->reloadPending) {
         s->reloadPending = false;
@@ -2186,6 +2236,9 @@ void ReviewComposer::Save() {
     eb.Add(StrL("sev"), ReviewSeverityName(sev));
     eb.Add(StrL("text"), t);
     eb.Add(StrL("rev"), s->pdfName);
+    if (len(s->revId) > 0) {
+        eb.Add(StrL("revid"), s->revId);
+    }
     eb.Add(StrL("page"), page);
     if (IsBox()) {
         eb.Add(StrL("x"), box.x);
@@ -2711,9 +2764,13 @@ static void WriteMoveEvent(MainWindow* win, ReviewSession* s, ReviewComment* c, 
     if (pw) {
         ReviewComputeFingerprint(&tmp, pt, pw->words);
     }
+    EnsureLoaded(s); // for the content fingerprint
     ReviewEventBuilder eb(StrL("move"), s->myId, NowTime());
     eb.Add(StrL("id"), c->key);
     eb.Add(StrL("rev"), s->pdfName);
+    if (len(s->revId) > 0) {
+        eb.Add(StrL("revid"), s->revId);
+    }
     eb.Add(StrL("page"), page);
     eb.Add(StrL("x"), pt.x);
     eb.Add(StrL("y"), pt.y);
@@ -3264,6 +3321,7 @@ static TempStr PanelStateJsonTemp(MainWindow* win) {
         jc.I("x", (i64)c->curRect.x); // reading order within a page
         jc.I("y", (i64)c->curRect.y);
         jc.S("rev", c->rev);
+        jc.B("otherRev", !IsSameRevision(s, c));
         jc.S("sheet", c->sheet);
         jc.S("comp", c->component);
         jc.S("clicked", c->clicked);

@@ -51,6 +51,7 @@ ReviewComment::~ReviewComment() {
     str::Free(userId);
     str::Free(text);
     str::Free(rev);
+    str::Free(revId);
     str::Free(shape);
     str::Free(component);
     str::Free(clicked);
@@ -378,6 +379,7 @@ static void ApplyEvent(ReviewModel* m, ReviewEvent* ev) {
         c->severity = ReviewSeverityFromName(ev->Get(StrL("sev")));
         ReplaceStr(&c->text, ev->Get(StrL("text")));
         ReplaceStr(&c->rev, ev->Get(StrL("rev")));
+        ReplaceStr(&c->revId, ev->Get(StrL("revid")));
         c->page = ev->GetInt(StrL("page"), 1);
         c->rect = RectF(ev->GetFloat(StrL("x")), ev->GetFloat(StrL("y")), ev->GetFloat(StrL("w")),
                         ev->GetFloat(StrL("h")));
@@ -482,6 +484,7 @@ static void ApplyEvent(ReviewModel* m, ReviewEvent* ev) {
     } else if (str::Eq(t, "move")) {
         // manual re-anchoring on another revision
         ReplaceStr(&c->rev, ev->Get(StrL("rev")));
+        ReplaceStr(&c->revId, ev->Get(StrL("revid")));
         c->page = ev->GetInt(StrL("page"), c->page);
         c->rect.x = ev->GetFloat(StrL("x"));
         c->rect.y = ev->GetFloat(StrL("y"));

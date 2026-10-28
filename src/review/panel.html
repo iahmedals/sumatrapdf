@@ -960,7 +960,9 @@ details.hist li b { color: var(--fg); font-weight: 600; }
     if (c.clicked && c.clicked !== c.comp) { h += '<dt>At</dt><dd>' + esc(c.clicked) + '</dd>'; }
     if (c.net) { h += '<dt>Net</dt><dd>' + esc(c.net) + ' <span class="muted">(marked everywhere it appears)</span></dd>'; }
     h += '<dt>Page</dt><dd>' + c.page + (c.origPage !== c.page ? ' <span class="muted">(was p.' + c.origPage + ')</span>' : '') + '</dd>';
-    if (c.rev && c.rev !== S.pdf.name) { h += '<dt>Made on</dt><dd>' + esc(c.rev) + '</dd>'; }
+    if (c.otherRev) {
+      h += '<dt>Made on</dt><dd>' + esc(c.rev) + (c.rev === S.pdf.name ? ' <span class="muted">(an earlier version of this file)</span>' : '') + '</dd>';
+    }
     h += '<dt>Round</dt><dd>' + c.round + '</dd>';
     h += '<dt>Added</dt><dd>' + esc(fullTime(c.created)) + ' by ' + esc(c.byName) + '</dd>';
     if (c.statusByName && c.status !== 'Open') {
