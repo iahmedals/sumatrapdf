@@ -311,6 +311,10 @@ ACCEL gBuiltInAccelerators[] = {
     // TODO: don't know what VK_ is this
     {0, '.', CmdPresentationBlackBackground},
     {FVIRTKEY, 'C', CmdToggleContinuousView},
+    // smartpdf design review
+    {FSHIFT | FCONTROL | FVIRTKEY, 'M', CmdAddReviewComment},
+    {FSHIFT | FCONTROL | FVIRTKEY, 'R', CmdToggleReviewPanel},
+    {FVIRTKEY, VK_F7, CmdToggleReviewMode},
 };
 
 ACCEL* gAccels = nullptr;

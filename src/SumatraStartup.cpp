@@ -67,6 +67,7 @@
 #include "CommandPalette.h"
 #include "SumatraControl.h"
 #include "SumatraLog.h"
+#include "ReviewUI.h"
 
 // return false if failed in a way that should abort the app
 static NO_INLINE bool MaybeMakePluginWindow(MainWindow* win, HWND hwndParent) {
@@ -659,6 +660,10 @@ static HACCEL FindAcceleratorsForHwnd(HWND hwnd, HWND* hwndAccel, bool* forwardS
 }
 
 static bool MaybeTranslateAccelerator(MSG& msg) {
+    // smartpdf: keyboard review mode keys (C, N, D, 1-4) win over the default shortcuts
+    if (msg.message == WM_KEYDOWN && ReviewPreTranslateKey(msg)) {
+        return true;
+    }
     // TODO: why mouse events?
     bool doAccels = ((msg.message >= WM_KEYFIRST && msg.message <= WM_KEYLAST) ||
                      (msg.message >= WM_MOUSEFIRST && msg.message <= WM_MOUSELAST));

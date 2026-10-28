@@ -288,6 +288,15 @@
     <ClInclude Include="..\src\RenderCache.h">
       <Filter>src</Filter>
     </ClInclude>
+    <ClInclude Include="..\src\Review.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\ReviewUI.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\ReviewXlsx.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="..\src\Scratch.h">
       <Filter>src</Filter>
     </ClInclude>
@@ -714,6 +723,15 @@
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\RenderCache.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\Review.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ReviewUI.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ReviewXlsx.cpp">
       <Filter>src</Filter>
     </ClCompile>
     <ClCompile Include="..\src\Scratch.cpp">

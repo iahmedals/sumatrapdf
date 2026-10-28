@@ -265,7 +265,7 @@ R"(<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="
 R"(<xf numFmtId="0" fontId="15" fillId="0" borderId="0" xfId="0" applyFont="1"/>)"
 R"(<xf numFmtId="0" fontId="7" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>)"
 R"(<xf numFmtId="0" fontId="16" fillId="9" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>)"
-R"(<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>)"
+R"(<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top"/></xf>)"
 R"(<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center"/></xf>)"
 R"(</cellXfs>)"
 R"(<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>)"
@@ -1024,7 +1024,7 @@ static TempStr BuildProgressSheet(ReviewXlsxArgs* args, Vec<ReviewComment*>& com
     }
     sb.EndRow();
 
-    static const ColWidth cols[] = {{0, 2}, {1, 28}, {2, 26}, {3, 22}, {4, 26}, {5, 12}, {6, 12}};
+    static const ColWidth cols[] = {{0, 2}, {1, 28}, {2, 26}, {3, 22}, {4, 26}, {5, 20}, {6, 24}};
     str::Builder b;
     b.Append(Str(kXmlDecl));
     b.Append(fmt("<worksheet xmlns=\"%s\" xmlns:r=\"%s\">", Str(kNsMain), Str(kNsRel)));

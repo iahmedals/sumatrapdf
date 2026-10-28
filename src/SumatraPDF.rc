@@ -73,6 +73,9 @@ IDR_MANUAL_PAK          RCDATA               "..\\docs\\manual.dat"
 
 IDR_CLAUDE_MARKED_JS    RCDATA               "..\\ext\\marked\\marked.min.js"
 
+// smartpdf design review panel (web app shown in WebView2)
+IDR_REVIEW_PANEL_HTML   RCDATA               "..\\src\\review\\panel.html"
+
 /////////////////////////////////////////////////////////////////////////////
 
 // Icon with lowest ID value placed first to ensure application icon

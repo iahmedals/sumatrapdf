@@ -264,9 +264,15 @@ enum {
     CmdCommandPaletteFavorites = 453,
     CmdNavigateFilesInFolder = 454,
     CmdNone = 455,
-    CmdPublishReviewComments = 456,
-    CmdImportReviewComments = 457,
+    CmdAddReviewComment = 456,
+    CmdToggleReviewMode = 457,
     CmdToggleReviewPanel = 458,
+    CmdMarkPageReviewed = 459,
+    CmdOpenReviewReport = 460,
+    CmdExportPdfWithComments = 461,
+    CmdNextReviewComment = 462,
+    CmdPrevReviewComment = 463,
+    CmdCompareRevisions = 464,
 
     /* range for file history */
     CmdFileHistoryFirst,

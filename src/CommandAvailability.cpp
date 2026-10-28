@@ -196,8 +196,16 @@ static UINT_PTR removeIfNoDiskAccessPerm[] = {
     CmdCreateShortcutToFile,
     CmdSaveEmbeddedFile,
     CmdShowLog,
-    CmdPublishReviewComments,
-    CmdImportReviewComments,
+    // smartpdf design review: comments live in files next to the PDF
+    CmdAddReviewComment,
+    CmdToggleReviewMode,
+    CmdToggleReviewPanel,
+    CmdMarkPageReviewed,
+    CmdOpenReviewReport,
+    CmdExportPdfWithComments,
+    CmdNextReviewComment,
+    CmdPrevReviewComment,
+    CmdCompareRevisions,
     0,
 };
 
@@ -212,8 +220,7 @@ static UINT_PTR removeIfAnnotsNotSupported[] = {
     // added past the CmdCreateAnnotFirst..CmdCreateAnnotLast range, so the
     // range check doesn't catch it
     CmdCreateAnnotImageFromClipboard,
-    CmdPublishReviewComments,
-    CmdImportReviewComments,
+    CmdExportPdfWithComments,
     0,
 };
 
@@ -237,6 +244,16 @@ static UINT_PTR removeIfChm[] = {
     CmdZoom12_5,
     CmdZoom8_33,
     CmdInvokeInverseSearch,
+    // smartpdf design review needs fixed page layout
+    CmdAddReviewComment,
+    CmdToggleReviewMode,
+    CmdToggleReviewPanel,
+    CmdMarkPageReviewed,
+    CmdOpenReviewReport,
+    CmdExportPdfWithComments,
+    CmdNextReviewComment,
+    CmdPrevReviewComment,
+    CmdCompareRevisions,
     0,
 };
 

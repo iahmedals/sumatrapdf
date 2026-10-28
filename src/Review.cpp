@@ -391,9 +391,9 @@ static void ApplyEvent(ReviewModel* m, ReviewEvent* ev) {
         ReplaceStr(&c->anchorWord, ev->Get(StrL("aw")));
         c->anchorDx = ev->GetFloat(StrL("ax"));
         c->anchorDy = ev->GetFloat(StrL("ay"));
-        Str near = ev->Get(StrL("near"));
-        if (len(near) > 0) {
-            Split(&c->nearWords, near, StrL("\n"), true);
+        Str nearStr = ev->Get(StrL("near"));
+        if (len(nearStr) > 0) {
+            Split(&c->nearWords, nearStr, StrL("\n"), true);
         }
         c->created = ev->ts;
         c->updated = ev->ts;
@@ -490,9 +490,9 @@ static void ApplyEvent(ReviewModel* m, ReviewEvent* ev) {
             c->anchorDx = ev->GetFloat(StrL("ax"));
             c->anchorDy = ev->GetFloat(StrL("ay"));
             c->nearWords.Reset();
-            Str near = ev->Get(StrL("near"));
-            if (len(near) > 0) {
-                Split(&c->nearWords, near, StrL("\n"), true);
+            Str nearStr = ev->Get(StrL("near"));
+            if (len(nearStr) > 0) {
+                Split(&c->nearWords, nearStr, StrL("\n"), true);
             }
         }
         if (ev->Has(StrL("sheet"))) {

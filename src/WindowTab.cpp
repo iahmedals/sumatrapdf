@@ -18,6 +18,7 @@
 #include "SumatraPDF.h"
 #include "MainWindow.h"
 #include "WindowTab.h"
+#include "ReviewUI.h"
 #include "Selection.h"
 #include "ReadAloudHighlight.h"
 #include "Translations.h"
@@ -53,6 +54,7 @@ WindowTab::~WindowTab() {
         hwndPDFOutline = nullptr;
     }
     CloseAndDeleteEditAnnotationsWindow(this);
+    ReviewFreeSession(this);
     FileWatcherUnsubscribe(watcher);
     if (AsChm()) {
         AsChm()->RemoveParentHwnd();

@@ -267,9 +267,15 @@ static SeqStrings gCommandNames =
     "CmdCommandPaletteFavorites\0"
     "CmdNavigateFilesInFolder\0"
     "CmdNone\0"
-    "CmdPublishReviewComments\0"
-    "CmdImportReviewComments\0"
+    "CmdAddReviewComment\0"
+    "CmdToggleReviewMode\0"
     "CmdToggleReviewPanel\0"
+    "CmdMarkPageReviewed\0"
+    "CmdOpenReviewReport\0"
+    "CmdExportPdfWithComments\0"
+    "CmdNextReviewComment\0"
+    "CmdPrevReviewComment\0"
+    "CmdCompareRevisions\0"
     "\0";
 
 static i32 gCommandIds[] = {
@@ -528,9 +534,15 @@ static i32 gCommandIds[] = {
     CmdCommandPaletteFavorites,
     CmdNavigateFilesInFolder,
     CmdNone,
-    CmdPublishReviewComments,
-    CmdImportReviewComments,
+    CmdAddReviewComment,
+    CmdToggleReviewMode,
     CmdToggleReviewPanel,
+    CmdMarkPageReviewed,
+    CmdOpenReviewReport,
+    CmdExportPdfWithComments,
+    CmdNextReviewComment,
+    CmdPrevReviewComment,
+    CmdCompareRevisions,
 };
 
 SeqStrings gCommandDescriptions =
@@ -789,9 +801,15 @@ SeqStrings gCommandDescriptions =
     "Command Palette: Favorites\0"
     "Navigate Files in Folder\0"
     "Do nothing\0"
-    "Publish Review Comments\0"
-    "Import Review Comments\0"
-    "Toggle Review Comments Panel\0"
+    "Add Review Comment\0"
+    "Toggle Review Mode\0"
+    "Toggle Review Panel\0"
+    "Mark Page as Reviewed\0"
+    "Open Review Report (Excel)\0"
+    "Export PDF with Review Comments\0"
+    "Next Review Comment\0"
+    "Previous Review Comment\0"
+    "Compare with Another Revision\0"
     "\0";
 // clang-format on
 // @gen-end cmd-c

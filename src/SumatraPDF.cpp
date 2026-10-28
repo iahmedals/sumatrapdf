@@ -85,6 +85,7 @@
 #include "uia/Provider.h"
 #include "SumatraConfig.h"
 #include "EditAnnotations.h"
+#include "ReviewUI.h"
 #include "AIChatCommon.h"
 #include "ClaudeCode.h"
 #include "GrokBuild.h"
@@ -1362,6 +1363,7 @@ void ControllerCallbackHandler::PageNoChanged(DocController* ctrl, int pageNo) {
     }
 
     UpdateTocSelection(win, pageNo);
+    ReviewOnPageChanged(win, pageNo);
     win->currPageNo = pageNo;
 
     if (!wnd) {
@@ -1527,10 +1529,8 @@ static void UpdateUiForCurrentTab(MainWindow* win) {
     if (pageInfoWnd) {
         UpdatePageInfoHelper(win->ctrl, pageInfoWnd, -1);
     }
-    // smartpdf: the review panel shows the current tab's comments
-    if (win->reviewVisible) {
-        RebuildReviewPanel(win);
-    }
+    // smartpdf: pins, panel and live sync follow the current tab
+    ReviewOnTabChanged(win);
 
     UpdateFindbox(win);
 
@@ -2299,6 +2299,7 @@ void UpdateAfterThemeChange() {
             // DarkMode::setDarkTooltips(win->infotip->hwnd, (int)DarkMode::ToolTipsType::tooltip);
         }
         UpdateWindowFrameBorderColor(win);
+        ReviewOnThemeChanged(win);
         // TODO: this only rerenders canvas, not frame, even with
         // includingNonClientArea == true.
         MainWindowRerender(win, true);
@@ -4725,7 +4726,8 @@ static bool IsLayoutStateEq(LayoutState* s1, LayoutState* s2) {
            s1->isToolbarVisible == s2->isToolbarVisible && s1->tocVisible == s2->tocVisible &&
            s1->showFavorites == s2->showFavorites && s1->showMenuBarRebar == s2->showMenuBarRebar &&
            s1->claudeVisible == s2->claudeVisible && s1->grokVisible == s2->grokVisible &&
-           s1->codexVisible == s2->codexVisible && s1->aiChatDx == s2->aiChatDx;
+           s1->codexVisible == s2->codexVisible && s1->reviewVisible == s2->reviewVisible &&
+           s1->aiChatDx == s2->aiChatDx;
 }
 
 static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
@@ -4748,6 +4750,7 @@ static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
     curState.claudeVisible = win->claudeVisible;
     curState.grokVisible = win->grokVisible;
     curState.codexVisible = win->codexVisible;
+    curState.reviewVisible = win->reviewVisible;
     curState.aiChatDx = win->aiChatDx;
 
     // skip redundant relayouts when all layout-affecting state is unchanged
@@ -4982,7 +4985,7 @@ static void RelayoutFrame(MainWindow* win, bool updateToolbars, int sidebarDx) {
         RedrawWindow(win->hwndFavBox, nullptr, nullptr, RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN);
     }
     if (win->reviewVisible && win->hwndReviewBox) {
-        RelayoutReviewPanel(win);
+        ReviewRelayoutPanel(win);
     } else if (win->codexVisible && win->hwndCodexBox) {
         RelayoutCodexPanel(win);
     } else if (win->grokVisible && win->hwndGrokBox) {
@@ -7637,19 +7640,38 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
             break;
         }
 
-        // smartpdf review mode
-        case CmdPublishReviewComments: {
-            PublishReviewComments(win, tab);
+        // smartpdf design review (ReviewUI.cpp)
+        case CmdAddReviewComment: {
+            if (!ReviewCanUse(win)) {
+                break;
+            }
+            // from the context menu the click position is in LPARAM
+            Point pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            ReviewAddComment(win, pt, lp != 0);
             break;
         }
-        case CmdImportReviewComments: {
-            ImportReviewComments(win, tab);
+        case CmdToggleReviewPanel:
+            ReviewTogglePanel(win);
             break;
-        }
-        case CmdToggleReviewPanel: {
-            ToggleReviewPanel(win);
+        case CmdToggleReviewMode:
+            ReviewToggleMode(win);
             break;
-        }
+        case CmdMarkPageReviewed:
+            ReviewMarkPageReviewed(win);
+            break;
+        case CmdOpenReviewReport:
+            ReviewOpenReport(win);
+            break;
+        case CmdExportPdfWithComments:
+            ReviewExportPdf(win);
+            break;
+        case CmdNextReviewComment:
+        case CmdPrevReviewComment:
+            ReviewSelectNext(win, cmdId == CmdNextReviewComment);
+            break;
+        case CmdCompareRevisions:
+            ReviewToggleCompare(win);
+            break;
 
         case CmdReadAloud: {
             if (!tab) {
@@ -8718,9 +8740,6 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
         return 0;
     }
     UpdateAnnotationsList(tab->editAnnotsWindow);
-    if (win->reviewVisible) {
-        RebuildReviewPanel(win);
-    }
 
     EditAnnotFocus focusTarget = EditAnnotFocus::Default;
     if (GetCommandBoolArg(cmd, kCmdArgFocusEdit, false)) {

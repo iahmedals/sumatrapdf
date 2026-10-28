@@ -47,6 +47,7 @@ static void SafeDeleteTabsCtrl(TabsCtrl* tabsCtrl) {
 }
 #include "Theme.h"
 #include "Canvas.h"
+#include "ReviewUI.h"
 
 struct LinkHandler : ILinkHandler {
     MainWindow* win = nullptr;
@@ -188,7 +189,7 @@ MainWindow::~MainWindow() {
     DestroyClaudePanel(this);
     DestroyGrokPanel(this);
     DestroyCodexPanel(this);
-    DestroyReviewPanel(this);
+    ReviewDestroyPanel(this);
 
     delete sidebarSplitter;
     delete favSplitter;

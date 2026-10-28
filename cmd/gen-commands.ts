@@ -259,9 +259,15 @@ export const commands = [
     "CmdCommandPaletteFavorites", "Command Palette: Favorites",
     "CmdNavigateFilesInFolder", "Navigate Files in Folder",
     "CmdNone", "Do nothing",
-    "CmdPublishReviewComments", "Publish Review Comments",
-    "CmdImportReviewComments", "Import Review Comments",
-    "CmdToggleReviewPanel", "Toggle Review Comments Panel",
+    "CmdAddReviewComment", "Add Review Comment",
+    "CmdToggleReviewMode", "Toggle Review Mode",
+    "CmdToggleReviewPanel", "Toggle Review Panel",
+    "CmdMarkPageReviewed", "Mark Page as Reviewed",
+    "CmdOpenReviewReport", "Open Review Report (Excel)",
+    "CmdExportPdfWithComments", "Export PDF with Review Comments",
+    "CmdNextReviewComment", "Next Review Comment",
+    "CmdPrevReviewComment", "Previous Review Comment",
+    "CmdCompareRevisions", "Compare with Another Revision",
 ];
 
 function getNames(): string[] {

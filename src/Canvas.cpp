@@ -54,6 +54,7 @@
 #include "Translations.h"
 
 #include "RefHover.h"
+#include "ReviewUI.h"
 
 // if set instead of trying to render pages we don't have, we simply do nothing
 // this reduces the flickering when going quickly through pages but creates
@@ -1303,6 +1304,11 @@ static void OnMouseLeftButtonDown(MainWindow* win, int x, int y, WPARAM key) {
     ReportIf(!dm);
     Point pt{x, y};
 
+    // smartpdf: review pins sit on top of everything
+    if (ReviewOnLeftButtonDown(win, x, y)) {
+        return;
+    }
+
     WindowTab* tab = win->CurrentTab();
     // PDF form filling: clicking a checkbox / radio-button toggles it; clicking a
     // text or choice field starts in-place editing. Widgets are hit-tested on
@@ -1574,6 +1580,9 @@ bool gDisableInteractiveInverseSearch = false;
 
 static void OnMouseLeftButtonDblClk(MainWindow* win, int x, int y, WPARAM key) {
     // lf("Left button clicked on %d %d", x, y);
+    if (ReviewOnLeftButtonDown(win, x, y)) {
+        return;
+    }
     auto isLeft = bit::IsMaskSet(key, (WPARAM)MK_LBUTTON);
     if (gGlobalPrefs->enableTeXEnhancements && !gDisableInteractiveInverseSearch && isLeft) {
         bool dontSelect = OnInverseSearch(win, x, y);
@@ -2181,6 +2190,8 @@ static bool DrawDocument(MainWindow* win, HDC hdc, RECT* rcArea) {
         PaintForwardSearchMark(win, hdc);
     }
 
+    ReviewPaint(win, hdc);
+
     if (!rendering) {
         DebugShowLinks(dm, hdc);
     }
@@ -2230,6 +2241,9 @@ static LRESULT OnSetCursorMouseNone(MainWindow* win, HWND hwnd) {
     }
     if (GetNotificationForGroup(win->hwndCanvas, kNotifCursorPos)) {
         SetCursorCached(IDC_CROSS);
+        return TRUE;
+    }
+    if (ReviewOnSetCursor(win, pt)) {
         return TRUE;
     }
 
@@ -3189,6 +3203,11 @@ static void OnTimer(MainWindow* win, HWND hwnd, WPARAM timerId) {
     }
 
     switch (timerId) {
+        case kReviewSyncTimerId:
+        case kReviewIdleTimerId:
+            ReviewOnTimer(win, timerId);
+            break;
+
         case REPAINT_TIMER_ID:
             win->delayedRepaintTimer = 0;
             KillTimer(hwnd, REPAINT_TIMER_ID);

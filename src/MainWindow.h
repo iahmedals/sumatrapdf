@@ -12,7 +12,6 @@ struct ReadAloudPlaybackBar;
 struct LabelWithCloseWnd;
 struct Splitter;
 struct ListBox;
-struct ReviewCommentInfo;
 struct Tooltip;
 struct TreeView;
 struct ILayout;
@@ -223,16 +222,19 @@ struct MainWindow {
     // width of the active AI chat sidebar (shared by Claude Code, Grok Build, and OpenAI Codex)
     int aiChatDx = 0;
 
-    // smartpdf review comments panel (right side, shares the AI chat slot and width)
+    // smartpdf review panel (right side, shares the AI chat slot and width), see ReviewUI.cpp
     HWND hwndReviewBox = nullptr;
     UINT_PTR reviewBoxSubclassId = 0;
+    WebviewWnd* reviewWebView = nullptr; // the web panel, or nullptr when using the native fallback
+    bool reviewPanelReady = false;       // the web panel loaded and can take updates
     LabelWithCloseWnd* reviewLabelWithClose = nullptr;
     ListBox* reviewListBox = nullptr;
     Edit* reviewDetails = nullptr;
     Splitter* reviewSplitter = nullptr;
     bool reviewVisible = false;
-    // owned; rebuilt by RebuildReviewPanel (EditAnnotations.cpp)
-    Vec<ReviewCommentInfo*>* reviewItems = nullptr;
+    bool reviewMode = false; // keyboard review mode (C, N, 1-4, D)
+    // native fallback: comment keys of the list items
+    StrVec* reviewItems = nullptr;
 
     // vertical splitter for resizing left side panel
     Splitter* sidebarSplitter = nullptr;
@@ -345,6 +347,7 @@ struct MainWindow {
         bool claudeVisible = false;
         bool grokVisible = false;
         bool codexVisible = false;
+        bool reviewVisible = false;
         int aiChatDx = 0;
     };
     LayoutState lastLayoutState;

@@ -746,6 +746,60 @@ static MenuDef menuDefContextReadAloud[] = {
 };
 //] ACCESSKEY_GROUP Context Menu (Read Aloud)
 
+//[ ACCESSKEY_GROUP Review
+// smartpdf design review (ReviewUI.cpp)
+static MenuDef menuDefReview[] = {
+    {
+        _TRN("&Add Review Comment"),
+        CmdAddReviewComment,
+    },
+    {
+        _TRN("Review &Panel"),
+        CmdToggleReviewPanel,
+    },
+    {
+        _TRN("Review &Mode (keyboard)"),
+        CmdToggleReviewMode,
+    },
+    {
+        kMenuSeparator,
+        kMenuSeparatorID,
+    },
+    {
+        _TRN("&Next Comment"),
+        CmdNextReviewComment,
+    },
+    {
+        _TRN("Pre&vious Comment"),
+        CmdPrevReviewComment,
+    },
+    {
+        _TRN("Mark Page as &Reviewed"),
+        CmdMarkPageReviewed,
+    },
+    {
+        kMenuSeparator,
+        kMenuSeparatorID,
+    },
+    {
+        _TRN("&Compare with Another Revision"),
+        CmdCompareRevisions,
+    },
+    {
+        _TRN("Open &Excel Report"),
+        CmdOpenReviewReport,
+    },
+    {
+        _TRN("E&xport PDF with Comments"),
+        CmdExportPdfWithComments,
+    },
+    {
+        nullptr,
+        0,
+    },
+};
+//] ACCESSKEY_GROUP Review
+
 //[ ACCESSKEY_GROUP Menubar
 static MenuDef menuDefMenubar[] = {
     {
@@ -771,6 +825,10 @@ static MenuDef menuDefMenubar[] = {
     {
         _TRN("Read Aloud (TTS)"),
         (UINT_PTR)menuDefReadAloud,
+    },
+    {
+        _TRN("&Review"),
+        (UINT_PTR)menuDefReview,
     },
     {
         _TRN("F&avorites"),
@@ -982,6 +1040,10 @@ static MenuDef menuDefDocumentOperations[] = {
 //[ ACCESSKEY_GROUP Context Menu (Main)
 static MenuDef menuDefContext[] = {
     {
+        _TRN("Add &Review Comment"),
+        CmdAddReviewComment,
+    },
+    {
         _TRN("&Copy Selection"),
         CmdCopySelection,
     },
@@ -1067,12 +1129,8 @@ static MenuDef menuDefContext[] = {
         CmdSaveAnnotations,
     },
     {
-        _TRN("Publish Review Comments"),
-        CmdPublishReviewComments,
-    },
-    {
-        _TRN("Import Review Comments"),
-        CmdImportReviewComments,
+        _TRN("Re&view"),
+        (UINT_PTR)menuDefReview,
     },
     {
         _TRN("Show Errors"),
@@ -1686,6 +1744,8 @@ static void MenuUpdateStateForWindow(MainWindow* win) {
     MenuSetChecked(win->menu, CmdFavoriteToggle, gGlobalPrefs->showFavorites);
     MenuSetChecked(win->menu, CmdToggleToolbar, gGlobalPrefs->showToolbar);
     MenuSetChecked(win->menu, CmdToggleMenuBar, gGlobalPrefs->showMenubar);
+    MenuSetChecked(win->menu, CmdToggleReviewPanel, win->reviewVisible);
+    MenuSetChecked(win->menu, CmdToggleReviewMode, win->reviewMode);
     // CmdChangeScrollbar doesn't need a check mark - it opens a dialog
     MenuUpdateDisplayMode(win);
     MenuUpdateZoom(win);
@@ -1913,6 +1973,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
     MenuUpdatePrintItem(win, popup, true);
     MenuSetEnabled(popup, CmdToggleBookmarks, win->ctrl->HasToc());
     MenuSetChecked(popup, CmdToggleBookmarks, win->tocVisible);
+    MenuSetChecked(popup, CmdToggleReviewPanel, win->reviewVisible);
+    MenuSetChecked(popup, CmdToggleReviewMode, win->reviewMode);
 
     MenuSetEnabled(popup, CmdFavoriteToggle, HasFavorites());
     MenuSetChecked(popup, CmdFavoriteToggle, gGlobalPrefs->showFavorites);
@@ -2001,7 +2063,8 @@ void OnWindowContextMenu(MainWindow* win, int x, int y) {
     }
     switch (cmdId) {
         case CmdEditAnnotations:
-        case CmdDeleteAnnotation: {
+        case CmdDeleteAnnotation:
+        case CmdAddReviewComment: {
             HwndSendCommand(win->hwndFrame, cmdId, lpArg);
             return;
         }

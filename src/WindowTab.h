@@ -9,6 +9,7 @@ namespace str {
 struct Builder;
 }
 struct ReadAloudHighlightMap;
+struct ReviewSession;
 
 /* Data related to a single document loaded into a tab/window */
 /* (none of these depend on MainWindow, so that a WindowTab could
@@ -53,6 +54,8 @@ struct WindowTab {
     TabState* tabState = nullptr; // when lazy loading
 
     Annotation* selectedAnnotation = nullptr;
+    // smartpdf design review state for this document (ReviewUI.cpp), created on demand
+    ReviewSession* review = nullptr;
     bool didScrollToSelectedAnnotation = false; // only automatically scroll once
 
     bool hideAnnotations = false;

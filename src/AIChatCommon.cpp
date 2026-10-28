@@ -553,23 +553,25 @@ static void ApplyPanelHwndVisibility(MainWindow* win) {
     if (!win) {
         return;
     }
+    // smartpdf: the review panel takes the right-side slot while it's visible
+    bool slotFree = !win->reviewVisible;
     if (win->hwndClaudeBox) {
-        HwndSetVisibility(win->hwndClaudeBox, win->claudeVisible);
+        HwndSetVisibility(win->hwndClaudeBox, slotFree && win->claudeVisible);
     }
     if (win->claudeSplitter && win->claudeSplitter->hwnd) {
-        HwndSetVisibility(win->claudeSplitter->hwnd, win->claudeVisible);
+        HwndSetVisibility(win->claudeSplitter->hwnd, slotFree && win->claudeVisible);
     }
     if (win->hwndGrokBox) {
-        HwndSetVisibility(win->hwndGrokBox, win->grokVisible);
+        HwndSetVisibility(win->hwndGrokBox, slotFree && win->grokVisible);
     }
     if (win->grokSplitter && win->grokSplitter->hwnd) {
-        HwndSetVisibility(win->grokSplitter->hwnd, win->grokVisible);
+        HwndSetVisibility(win->grokSplitter->hwnd, slotFree && win->grokVisible);
     }
     if (win->hwndCodexBox) {
-        HwndSetVisibility(win->hwndCodexBox, win->codexVisible);
+        HwndSetVisibility(win->hwndCodexBox, slotFree && win->codexVisible);
     }
     if (win->codexSplitter && win->codexSplitter->hwnd) {
-        HwndSetVisibility(win->codexSplitter->hwnd, win->codexVisible);
+        HwndSetVisibility(win->codexSplitter->hwnd, slotFree && win->codexVisible);
     }
 }
 
