@@ -4250,7 +4250,7 @@ bool ReviewPreTranslateKey(MSG& msg) {
         return false;
     }
     MainWindow* win = FindMainWindowByHwnd(msg.hwnd);
-    if (!win) {
+    if (!win || !win->AsFixed()) {
         return false;
     }
     // called for every key press: only look at already loaded state
