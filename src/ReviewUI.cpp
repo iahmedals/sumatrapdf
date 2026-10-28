@@ -1496,6 +1496,14 @@ void ReviewPaint(MainWindow* win, HDC hdc) {
     sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
     sf.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
 
+    // net comments: ring the net everywhere it appears on the visible pages,
+    // also when the comment's own pin is on a page that isn't visible
+    for (ReviewComment* c : s->model.comments) {
+        if (len(c->net) > 0 && IsVisibleOnCanvas(s, c)) {
+            PaintNetMarkers(g, dm, s, c, scale);
+        }
+    }
+
     // paint the selected pin last so it's on top
     Vec<ReviewComment*> order;
     ReviewComment* selected = nullptr;
@@ -1524,7 +1532,6 @@ void ReviewPaint(MainWindow* win, HDC hdc) {
         if (c->anchorState == ReviewAnchorState::Gone) {
             alpha = 150;
         }
-        PaintNetMarkers(g, dm, s, c, scale);
 
         Point anchor = dm->CvtToScreen(c->curPage, PointF{c->curRect.x, c->curRect.y});
         if (compact && c != selected) {
