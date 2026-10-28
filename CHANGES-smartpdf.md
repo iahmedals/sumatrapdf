@@ -46,6 +46,9 @@ synced to every PC by OneDrive, is the hub.
   the spot. Pick the severity (**Critical / Major / Minor / Comment**, Ctrl+1…4), type,
   **Enter** saves (Shift+Enter = new line, Esc = cancel, Ctrl+T = templates).
   Page, sheet title and the nearest part (R45, U12…) are filled in automatically.
+  Nothing typed gets lost: with text in the box, Esc asks for a second Esc, and if the
+  window closes while the box is open the text goes to
+  `%LOCALAPPDATA%\SumatraPDF\review-drafts.txt`.
 - **Already reported?** If someone commented on the same spot or part, the pop-up shows it
   with a **+1 instead** button.
 - **Area comments:** hold Ctrl and drag a rectangle first, then Add Review Comment and
@@ -81,7 +84,8 @@ synced to every PC by OneDrive, is the hub.
 
 ### New PDF revisions
 
-- Export the new revision into the same folder. Comments follow it: each comment
+- Export the new revision into the same folder, under a new name or over the old file
+  (both work: revisions are told apart by their content). Comments follow it: each comment
   remembers its part and the words around it and is found again even when things moved a
   bit. Card badges: ✓ found, ⚠ moved (please check), ✕ gone (part removed, maybe fixed).
   **Move pin** corrects a spot.

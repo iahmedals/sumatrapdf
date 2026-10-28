@@ -1948,6 +1948,7 @@ struct ReviewComposer : Wnd {
     Rect rcSave;
     int hot = kHitNone;
     bool closing = false;
+    bool escArmed = false; // Esc with text typed: the next Esc discards it
 
     ReviewComposer() = default;
     ~ReviewComposer() override;
@@ -1982,6 +1983,29 @@ ReviewComposer::~ReviewComposer() {
     str::Free(nearJoined);
     str::Free(title);
     str::Free(context);
+}
+
+// the window is closing with a comment still being written: keep the text in
+// %LOCALAPPDATA%\SumatraPDF\review-drafts.txt instead of losing it
+static void SaveComposerDraft(ReviewComposer* c) {
+    TempStr text = c->edit ? c->edit->GetTextTemp() : TempStr{};
+    if (str::IsEmptyOrWhiteSpace(text)) {
+        return;
+    }
+    Str base = Str(getenv("LOCALAPPDATA"));
+    if (!base) {
+        return;
+    }
+    TempStr dir = path::JoinTemp(base, StrL("SumatraPDF"));
+    dir::CreateAll(dir);
+    TempStr p = path::JoinTemp(dir, StrL("review-drafts.txt"));
+    TempStr entry = fmt("--- %s, %s, page %d\r\n%s\r\n\r\n", ReviewFormatTimeTemp(NowTime()), path::GetBaseNameTemp(c->pdfPath),
+                        c->page, text);
+    FILE* f = _wfopen(CWStrTemp(p), L"ab");
+    if (f) {
+        fwrite(entry.s, 1, (size_t)entry.len, f);
+        fclose(f);
+    }
 }
 
 static void DestroyComposerTask(ReviewComposer* c) {
@@ -2384,8 +2408,14 @@ void ReviewComposer::Paint(HDC hdcWnd) {
     StrokeRoundRect(g, rcEditFrame, (float)Px(hwnd, 6),
                     editFocused ? GdipColor(kSevColor[(int)sev]) : Gdiplus::Color(255, 0xD1, 0xD5, 0xDB),
                     editFocused ? 1.6f : 1.f);
-    GdipDrawText(g, StrL("Enter to save  \xc2\xb7  Shift+Enter new line  \xc2\xb7  Ctrl+1-4 severity  \xc2\xb7  Esc cancel"),
-             &fntNormal, rcHint, dim);
+    if (escArmed) {
+        GdipDrawText(g, StrL("Press Esc again to throw this comment away, Enter saves it"), &bold, rcHint,
+                     GdipColor(kSevColor[(int)ReviewSeverity::Critical]));
+    } else {
+        GdipDrawText(g,
+                     StrL("Enter to save  \xc2\xb7  Shift+Enter new line  \xc2\xb7  Ctrl+1-4 severity  \xc2\xb7  Esc cancel"),
+                     &fntNormal, rcHint, dim);
+    }
 
     // duplicate hint
     if (!rcDup.IsEmpty()) {
@@ -2442,8 +2472,20 @@ bool ReviewComposer::PreTranslateMessage(MSG& msg) {
     bool ctrl = IsCtrlPressed();
     bool alt = IsAltPressed();
     if (vk == VK_ESCAPE) {
+        TempStr cur = edit ? edit->GetTextTemp() : TempStr{};
+        if (!escArmed && !str::IsEmptyOrWhiteSpace(cur) && len(editKey) == 0) {
+            // don't lose a written comment to a stray Esc
+            escArmed = true;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            MessageBeep(MB_ICONWARNING);
+            return true;
+        }
         Cancel();
         return true;
+    }
+    if (escArmed) {
+        escArmed = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
     }
     if (vk == VK_RETURN && !IsShiftPressed()) {
         Save();
@@ -4166,6 +4208,7 @@ void ReviewDestroyPanel(MainWindow* win) {
         ReviewComposer* c = gComposer;
         gComposer = nullptr;
         c->closing = true;
+        SaveComposerDraft(c);
         delete c;
     }
     if (win->hwndCanvas) {
