@@ -24,6 +24,7 @@ connects it to the viewer:
 #include "base/GdiPlus.h"
 #include "base/Pixmap.h"
 #include "base/ScopedWin.h"
+#include "base/Timer.h"
 #include "base/JsonParser.h"
 
 #include "wingui/UIModels.h"
@@ -195,6 +196,14 @@ struct ReviewSession {
     int ticks = 0;
     i64 lastMentionCheck = 0;
 
+    int titlesFetched = 0;
+
+    // logs are loaded in the background (LoadThread)
+    bool loading = false;
+    bool reloadPending = false; // something changed while loading
+    bool loadedOnce = false;
+    int appendCount = 0; // my writes; a load started before a write is outdated
+
     bool reportDirty = false;
     bool reportBusy = false;
     i64 reportNextTry = 0;
@@ -323,11 +332,32 @@ static bool EnsureReviewDir(MainWindow* win, ReviewSession* s) {
 }
 
 // --- loading logs ---
+// Logs are read on a background thread: with OneDrive "files on demand" a log
+// that another reviewer just wrote may have to be downloaded first.
 
 static void ApplyResolutions(ReviewSession* s, bool* needsWorkOut);
 
+static i64 ComputeSignature(Str reviewDir) {
+    i64 sig = 0;
+    if (!dir::Exists(reviewDir)) {
+        return 0;
+    }
+    DirIter di{reviewDir};
+    for (DirIterEntry* de : di) {
+        if (!str::EndsWithI(de->name, StrL(".jsonl")) && !str::EndsWithI(de->name, StrL(".csv"))) {
+            continue;
+        }
+        WIN32_FIND_DATAW* fd = de->fd;
+        if (fd) {
+            sig = sig * 31 + (i64)fd->nFileSizeLow + ((i64)fd->ftLastWriteTime.dwLowDateTime << 8);
+        }
+    }
+    return sig;
+}
+
 // v0.3 stored one csv per reviewer: Rev,Page,Sheet,Component,ClickedText,Comment,Reviewer,Date,X,Y
-static void ImportLegacyCsv(ReviewSession* s, Str filePath, Str fileName) {
+// myLogPath: if the csv is mine, it's moved into my log once (empty: only read it)
+static void ImportLegacyCsv(Str filePath, Str fileName, Str myId, Str myLogPath, Vec<ReviewEvent*>& events) {
     TempStr owner = ReviewSanitizeUserIdTemp(Str(fileName.s, fileName.len - 4));
     Str data = file::ReadFile(filePath);
     if (!data) {
@@ -370,9 +400,9 @@ static void ImportLegacyCsv(ReviewSession* s, Str filePath, Str fileName) {
         return;
     }
     Str ls(lines.els, (int)lines.len);
-    if (str::EqI(owner, s->myId) && !s->localFallback) {
+    if (str::EqI(owner, myId) && len(myLogPath) > 0) {
         // my own legacy file: move it into my log once
-        FILE* f = _wfopen(CWStrTemp(s->myLogPath), L"ab");
+        FILE* f = _wfopen(CWStrTemp(myLogPath), L"ab");
         if (f) {
             fwrite(ls.s, 1, (size_t)ls.len, f);
             fclose(f);
@@ -380,56 +410,44 @@ static void ImportLegacyCsv(ReviewSession* s, Str filePath, Str fileName) {
             MoveFileExW(CWStrTemp(filePath), CWStrTemp(done), MOVEFILE_REPLACE_EXISTING);
         }
     }
-    ReviewParseLog(ls, s->events);
+    ReviewParseLog(ls, events);
 }
 
-static i64 ComputeSignature(ReviewSession* s) {
-    i64 sig = 0;
-    if (!dir::Exists(s->reviewDir)) {
-        return 0;
+// reads and parses every reviewer's log in reviewDir
+static void ReadAllLogs(Str reviewDir, Str myId, Str myLogPath, Vec<ReviewEvent*>& events) {
+    if (!dir::Exists(reviewDir)) {
+        return;
     }
-    DirIter di{s->reviewDir};
+    StrVec csvFiles;
+    StrVec csvNames;
+    DirIter di{reviewDir};
     for (DirIterEntry* de : di) {
-        if (!str::EndsWithI(de->name, StrL(".jsonl")) && !str::EndsWithI(de->name, StrL(".csv"))) {
+        if (str::EndsWithI(de->name, StrL(".jsonl"))) {
+            Str data = file::ReadFile(de->filePath);
+            if (data) {
+                ReviewParseLog(data, events);
+                str::Free(data);
+            }
+        } else if (str::EndsWithI(de->name, StrL(".csv")) && !str::EqI(de->name, StrL("ALL-comments.csv"))) {
+            csvFiles.Append(de->filePath);
+            csvNames.Append(de->name);
+        }
+    }
+    int n = len(csvFiles);
+    for (int i = 0; i < n; i++) {
+        // a legacy reviewer who already has a log was migrated
+        TempStr owner = ReviewSanitizeUserIdTemp(Str(csvNames.At(i).s, csvNames.At(i).len - 4));
+        TempStr logPath = path::JoinTemp(reviewDir, fmt("%s.jsonl", owner));
+        if (file::Exists(logPath)) {
             continue;
         }
-        WIN32_FIND_DATAW* fd = de->fd;
-        if (fd) {
-            sig = sig * 31 + (i64)fd->nFileSizeLow + ((i64)fd->ftLastWriteTime.dwLowDateTime << 8);
-        }
+        ImportLegacyCsv(csvFiles.At(i), csvNames.At(i), myId, myLogPath, events);
     }
-    return sig;
 }
 
-static void LoadAllLogs(ReviewSession* s) {
-    ReviewDeleteEvents(s->events);
-    if (dir::Exists(s->reviewDir)) {
-        StrVec csvFiles;
-        StrVec csvNames;
-        DirIter di{s->reviewDir};
-        for (DirIterEntry* de : di) {
-            if (str::EndsWithI(de->name, StrL(".jsonl"))) {
-                Str data = file::ReadFile(de->filePath);
-                if (data) {
-                    ReviewParseLog(data, s->events);
-                    str::Free(data);
-                }
-            } else if (str::EndsWithI(de->name, StrL(".csv")) && !str::EqI(de->name, StrL("ALL-comments.csv"))) {
-                csvFiles.Append(de->filePath);
-                csvNames.Append(de->name);
-            }
-        }
-        int n = len(csvFiles);
-        for (int i = 0; i < n; i++) {
-            // a legacy reviewer who already has a log was migrated
-            TempStr owner = ReviewSanitizeUserIdTemp(Str(csvNames.At(i).s, csvNames.At(i).len - 4));
-            TempStr logPath = path::JoinTemp(s->reviewDir, fmt("%s.jsonl", owner));
-            if (file::Exists(logPath) && !str::EqI(owner, s->myId)) {
-                continue;
-            }
-            ImportLegacyCsv(s, csvFiles.At(i), csvNames.At(i));
-        }
-    }
+// rebuilds the model from s->events and everything that depends on it.
+// Returns true if comments must be located in this revision (idle work)
+static bool ApplyEvents(ReviewSession* s) {
     ReviewReplay(&s->model, s->events);
     ReviewUser* me = s->model.FindUser(s->myId);
     s->profileKnown = me && len(me->name) > 0;
@@ -444,10 +462,71 @@ static void LoadAllLogs(ReviewSession* s) {
     }
     bool needsWork = false;
     ApplyResolutions(s, &needsWork);
-    s->signature = ComputeSignature(s);
     if (IsDesigner(s)) {
         s->reportDirty = true;
     }
+    return needsWork;
+}
+
+static TempStr MyLogPathForMigrationTemp(ReviewSession* s) {
+    return s->localFallback ? TempStr{} : str::DupTemp(s->myLogPath);
+}
+
+// synchronous load, when the complete model is needed right now (e.g. to number
+// a new comment) and the background load hasn't finished yet
+static void EnsureLoaded(ReviewSession* s) {
+    if (s->loadedOnce) {
+        return;
+    }
+    ReviewDeleteEvents(s->events);
+    s->signature = ComputeSignature(s->reviewDir);
+    ReadAllLogs(s->reviewDir, s->myId, MyLogPathForMigrationTemp(s), s->events);
+    ApplyEvents(s);
+    s->loadedOnce = true;
+    s->appendCount++; // a background load still running is outdated now
+}
+
+struct ReviewLoadJob {
+    MainWindow* win = nullptr;
+    Str pdfPath; // identifies the session
+    Str reviewDir;
+    Str myId;
+    Str myLogPath;
+    int appendCount = 0;
+    i64 signature = 0;
+    Vec<ReviewEvent*> events;
+    ~ReviewLoadJob() {
+        str::Free(pdfPath);
+        str::Free(reviewDir);
+        str::Free(myId);
+        str::Free(myLogPath);
+        ReviewDeleteEvents(events);
+    }
+};
+
+static void LoadDone(ReviewLoadJob* job);
+
+static void LoadThread(ReviewLoadJob* job) {
+    // signature first: files that change while being read are noticed next time
+    job->signature = ComputeSignature(job->reviewDir);
+    ReadAllLogs(job->reviewDir, job->myId, job->myLogPath, job->events);
+    uitask::Post(MkFunc0(LoadDone, job), "ReviewLoadDone");
+}
+
+static void StartLoad(MainWindow* win, ReviewSession* s) {
+    if (s->loading) {
+        s->reloadPending = true;
+        return;
+    }
+    auto job = new ReviewLoadJob();
+    job->win = win;
+    job->pdfPath = str::Dup(s->pdfPath);
+    job->reviewDir = str::Dup(s->reviewDir);
+    job->myId = str::Dup(s->myId);
+    job->myLogPath = str::Dup(MyLogPathForMigrationTemp(s));
+    job->appendCount = s->appendCount;
+    s->loading = true;
+    RunAsync(MkFunc0(LoadThread, job), "ReviewLoad");
 }
 
 static void ClearPageCaches(ReviewSession* s) {
@@ -521,7 +600,7 @@ static ReviewSession* GetSession(WindowTab* tab, bool create) {
         s->pageCount = engine->PageCount();
         ClearPageCaches(s);
         s->lastMentionCheck = NowTime();
-        LoadAllLogs(s);
+        StartLoad(tab->win, s);
         StartReviewTimers(tab->win);
     }
     if (s->engine != engine) {
@@ -728,6 +807,7 @@ static void StartReviewTimers(MainWindow* win) {
 
 // appends JSON lines to my log and updates the model
 static bool AppendEvents(MainWindow* win, ReviewSession* s, Str lines) {
+    EnsureLoaded(s); // e.g. my profile must be known before writing
     if (!EnsureReviewDir(win, s)) {
         return false;
     }
@@ -751,25 +831,12 @@ static bool AppendEvents(MainWindow* win, ReviewSession* s, Str lines) {
         ShowReviewToast(win, _TRA("Couldn't save the review comment"), true);
         return false;
     }
+    s->appendCount++; // a background load that started before this is outdated
     ReviewParseLog(data, s->events);
-    ReviewReplay(&s->model, s->events);
-    ReviewUser* me = s->model.FindUser(s->myId);
-    s->profileKnown = me && len(me->name) > 0;
-    if (len(s->model.templates) == 0) {
-        SetStr(&s->model.templates, Str(kDefaultTemplates));
-    }
-    if (len(s->model.checklist) == 0) {
-        SetStr(&s->model.checklist, Str(kDefaultChecklist));
-    }
-    bool needsWork = false;
-    ApplyResolutions(s, &needsWork);
-    if (needsWork) {
+    if (ApplyEvents(s)) {
         StartIdleWork(win);
     }
-    s->signature = ComputeSignature(s);
-    if (IsDesigner(s)) {
-        s->reportDirty = true;
-    }
+    s->signature = ComputeSignature(s->reviewDir);
     RefreshReviewUI(win);
     return true;
 }
@@ -1090,15 +1157,34 @@ static void NotifyMentions(MainWindow* win, ReviewSession* s) {
     }
 }
 
-static void ReloadSession(MainWindow* win, ReviewSession* s) {
-    LoadAllLogs(s);
-    NotifyMentions(win, s);
-    bool needsWork = false;
-    ApplyResolutions(s, &needsWork);
-    if (needsWork) {
-        StartIdleWork(win);
+static void LoadDone(ReviewLoadJob* job) {
+    AutoDelete del(job);
+    ReviewSession* s = FindSessionByPath(job->win, job->pdfPath);
+    if (!s) {
+        return; // the tab was closed
     }
-    RefreshReviewUI(win);
+    s->loading = false;
+    bool outdated = job->appendCount != s->appendCount || !str::EqI(job->reviewDir, s->reviewDir);
+    if (outdated || s->reloadPending) {
+        s->reloadPending = false;
+        StartLoad(job->win, s);
+        return;
+    }
+    ReviewDeleteEvents(s->events);
+    for (ReviewEvent* e : job->events) {
+        s->events.Append(e);
+    }
+    job->events.Reset();
+    bool firstLoad = !s->loadedOnce;
+    s->loadedOnce = true;
+    s->signature = job->signature;
+    if (ApplyEvents(s)) {
+        StartIdleWork(job->win);
+    }
+    if (!firstLoad) {
+        NotifyMentions(job->win, s);
+    }
+    RefreshReviewUI(job->win);
 }
 
 static void SyncTick(MainWindow* win) {
@@ -1125,9 +1211,10 @@ static void SyncTick(MainWindow* win) {
         }
     }
     if (maybeChanged) {
-        i64 sig = ComputeSignature(s);
+        i64 sig = ComputeSignature(s->reviewDir);
         if (sig != s->signature) {
-            ReloadSession(win, s);
+            s->signature = sig; // start this reload only once
+            StartLoad(win, s);
         }
     }
     for (ReviewComment* c : s->model.comments) {
@@ -1143,6 +1230,34 @@ static void SyncTick(MainWindow* win) {
 }
 
 static int CountVisibleNetWorkPending(MainWindow* win, ReviewSession* s, bool* didExtract);
+
+// sheet titles for the panel (Sheets tab, report): reads the text of the remaining
+// pages, one page at a time and only while the user isn't doing anything.
+// Returns true while there are pages left
+static bool PrefetchTitlesStep(MainWindow* win, ReviewSession* s, bool* didExtract) {
+    if (!win->reviewVisible) {
+        return false;
+    }
+    int next = 0;
+    int n = len(s->pages);
+    for (int i = 0; i < n; i++) {
+        if (!s->pages[i]->loaded) {
+            next = i + 1;
+            break;
+        }
+    }
+    if (next == 0) {
+        return false;
+    }
+    LASTINPUTINFO li{};
+    li.cbSize = sizeof(li);
+    if (GetLastInputInfo(&li) && GetTickCount() - li.dwTime < 1000) {
+        return true; // the user is scrolling or typing: later
+    }
+    PageWords(s, next);
+    *didExtract = true;
+    return true;
+}
 
 static void IdleTick(MainWindow* win) {
     ReviewSession* s = CurrentSession(win);
@@ -1167,10 +1282,20 @@ static void IdleTick(MainWindow* win) {
         // pins moved or net markers became available; the panel gets one update at the end
         ScheduleRepaint(win, 0);
     }
-    if (!more) {
-        KillTimer(win->hwndCanvas, kReviewIdleTimerId);
-        PanelUpdate(win);
+    if (more) {
+        return;
     }
+    bool fetchedTitle = false;
+    if (PrefetchTitlesStep(win, s, &fetchedTitle)) {
+        // low priority work: tick slower
+        SetTimer(win->hwndCanvas, kReviewIdleTimerId, 150, nullptr);
+        if (fetchedTitle && ++s->titlesFetched % 10 == 0) {
+            PanelUpdate(win);
+        }
+        return;
+    }
+    KillTimer(win->hwndCanvas, kReviewIdleTimerId);
+    PanelUpdate(win);
 }
 
 static void CompareTick(MainWindow* win);
@@ -1657,6 +1782,7 @@ void ReviewMarkPageReviewed(MainWindow* win) {
     if (!s || !dm) {
         return;
     }
+    EnsureLoaded(s);
     int page = dm->CurrentPageNo();
     ReviewUser* me = s->model.FindUser(s->myId);
     TempStr pageStr = fmt("%d", page);
@@ -1973,6 +2099,7 @@ void ReviewComposer::Save() {
         Cancel();
         return;
     }
+    EnsureLoaded(s); // the comment number must not clash with one not loaded yet
     TempStr text = edit->GetTextTemp();
     str::TrimWSInPlace(text, str::TrimOpt::Both);
     text = Str(text.s); // trimming shortened the buffer
@@ -2321,7 +2448,16 @@ static bool LooksLikeNet(Str w) {
 }
 
 static void OpenComposer(MainWindow* win, ReviewSession* s, int page, PointF pt, RectF box, Str editKey) {
-    if (gComposer) {
+    if (gComposer && !gComposer->closing) {
+        // don't throw away a comment that is being written
+        TempStr cur = gComposer->edit ? gComposer->edit->GetTextTemp() : TempStr{};
+        if (!str::IsEmptyOrWhiteSpace(cur)) {
+            ShowWindow(gComposer->hwnd, SW_SHOW);
+            HwndSetFocus(gComposer->edit->hwnd);
+            MessageBeep(MB_ICONWARNING);
+            ShowReviewToast(win, _TRA("Save or cancel the open comment first"), true);
+            return;
+        }
         CloseComposer(gComposer);
     }
     auto c = new ReviewComposer();
@@ -3165,6 +3301,9 @@ static TempStr ThemeJsonTemp() {
 
 // --- review panel: the web view ---
 
+// when the web panel was created, to log how long it takes to come up
+static LARGE_INTEGER gPanelCreateTime{};
+
 struct ReviewWebView : WebviewWnd {
     MainWindow* win = nullptr;
     void OnBrowserMessage(Str msg) override;
@@ -3229,7 +3368,13 @@ static void PanelUpdate(MainWindow* win) {
     }
     if (win->reviewWebView) {
         if (win->reviewPanelReady) {
-            PanelEval(win, fmt("window.smartpdf && smartpdf.update(%s)", PanelStateJsonTemp(win)));
+            auto t = TimeGet();
+            TempStr json = PanelStateJsonTemp(win);
+            PanelEval(win, fmt("window.smartpdf && smartpdf.update(%s)", json));
+            double ms = TimeSinceInMs(t);
+            if (ms > 20) {
+                logf("review: panel update took %.0f ms (%d bytes)\n", ms, json.len);
+            }
         }
         return;
     }
@@ -3335,6 +3480,7 @@ static void HandlePanelMessage(MainWindow* win, Str msg) {
     }
     Str cmd = m.Get("cmd");
     if (str::Eq(cmd, "ready")) {
+        logf("review: panel ready in %.0f ms\n", TimeSinceInMs(gPanelCreateTime));
         win->reviewPanelReady = true;
         PanelEval(win, fmt("window.smartpdf && smartpdf.setTheme(%s)", ThemeJsonTemp()));
         PanelEval(win, fmt("window.smartpdf && smartpdf.update(%s)", PanelStateJsonTemp(win)));
@@ -3796,6 +3942,7 @@ static void CreateReviewPanel(MainWindow* win) {
     if (win->hwndReviewBox) {
         return;
     }
+    gPanelCreateTime = TimeGet();
     HMODULE hmod = GetModuleHandle(nullptr);
     DWORD style = WS_CHILD | WS_CLIPCHILDREN;
     win->hwndReviewBox = CreateWindowExW(0, WC_STATIC, L"", style, 0, 0, 300, 0, win->hwndFrame, nullptr, hmod, nullptr);
@@ -3856,6 +4003,7 @@ void ReviewTogglePanel(MainWindow* win) {
     win->reviewVisible = !win->reviewVisible;
     if (win->reviewVisible) {
         CurrentSession(win, true);
+        StartIdleWork(win); // sheet titles for the panel
         if (win->aiChatDx <= 0) {
             win->aiChatDx = DpiScale(win->hwndFrame, 380);
         }

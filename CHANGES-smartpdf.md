@@ -23,38 +23,100 @@ of text clickable. The forked reader understands the special links the tool writ
 The tool also adds a **bookmarks sidebar** (the PDF outline panel) listing the part numbers
 (`--bookmarks all` adds nets too) — works in any viewer.
 
-## Design review mode (v0.3.0)
+## Design review (v0.4.0)
 
-The reader doubles as a multi-reviewer schematic review tool. No server — a shared
-network folder is the hub.
+The reader is a multi-reviewer schematic review tool. No server: a SharePoint folder,
+synced to every PC by OneDrive, is the hub.
 
-**For reviewers:**
-1. Open the review PDF (it lives in a shared folder, e.g. `\\share\reviews\boardX\`).
-2. Right-click a spot → Create Annotation Under Cursor → Text. The comment box opens
-   by itself with the cursor ready — type and close. Repeat for every finding.
-3. When done: right-click → **Publish Review Comments**. Your comments are written to
-   `review-comments\<your-username>.csv` next to the PDF, with page number, sheet title,
-   nearest component (R45, U12…), the clicked word, and date filled in automatically.
+### Set up (once per design)
 
-**The central sheet:** `review-comments\ALL-comments.csv` is rebuilt on every publish and
-merges everyone's comments — open it in Excel directly. For a permanent workbook that
-refreshes itself: Excel → Data → Get Data → From File → From Folder → pick the
-`review-comments` folder → Combine & Load; from then on "Refresh All" pulls in the latest
-comments.
+1. Keep the schematic PDFs in a SharePoint folder and click **Sync** in SharePoint so
+   OneDrive keeps a copy on every reviewer's PC. Put every new revision in the same folder.
+2. The first comment creates a `review-comments` folder next to the PDF. Everyone's
+   comments live there, one file per person (`<username>.jsonl`), so nobody ever
+   overwrites anybody else. Snapshots go to `review-comments\snapshots`.
+3. The designer opens the review panel (Ctrl+Shift+R) → **Team** → **I'm the designer**.
+   From then on the designer's PC keeps `Review-Report.xlsx` (next to the PDF) up to date.
+   Everyone else only opens it (Excel desktop, or Excel Online in SharePoint).
 
-**For the designer:**
-- Right-click → **Import Review Comments** → every reviewer's notes appear as sticky
-  notes at the spots they clicked, named by reviewer. Re-running syncs (no duplicates).
-  The notes are an overlay: the PDF file is NOT modified unless you explicitly use
-  "Save Annotations".
-- **Review Comments panel** (search "Toggle Review Comments Panel" in the command
-  palette, Ctrl+Shift+P): every comment as a card — component, page, reviewer (with a
-  per-reviewer color), comment, sheet/revision/date. Click a card to jump to that exact
-  spot (Alt+Left goes back). The pane below the list shows every detail of the selected
-  comment in full.
-- **Revisions:** the `review-comments` folder has a fixed name, so when a new revision
-  PDF is exported into the same folder, Import on the new PDF still finds all comments.
-  Each CSV row records which revision file the comment was made on.
+### Reviewing
+
+- **Add a comment:** right-click the spot → **Add Review Comment**, or press
+  **Ctrl+Shift+M** with the mouse over it, or click **+ Comment** in the panel and then
+  the spot. Pick the severity (**Critical / Major / Minor / Comment**, Ctrl+1…4), type,
+  **Enter** saves (Shift+Enter = new line, Esc = cancel, Ctrl+T = templates).
+  Page, sheet title and the nearest part (R45, U12…) are filled in automatically.
+- **Already reported?** If someone commented on the same spot or part, the pop-up shows it
+  with a **+1 instead** button.
+- **Area comments:** hold Ctrl and drag a rectangle first, then Add Review Comment and
+  choose box, ellipse or highlight.
+- **Net comments:** comment on a net name and tick "apply to the whole net": the net gets
+  marked everywhere it appears.
+- Every comment gets an ID like `AAS-014` (your initials + a number): the same on the
+  pin, the card and in Excel.
+- **No Publish button any more:** saving is publishing. Others see your comment within
+  seconds (as fast as OneDrive syncs) and get a pop-up when you @mention them.
+- **Snapshot:** a small picture of the spot is saved with every comment (card + Excel).
+- **Pins** on the page: colored by severity, numbered with the ID, same size at any zoom.
+  Hover shows the comment. ✓ = fixed, ✗ = rejected, amber dot = moved in this
+  revision (check it), dashed = the part is gone. Click a pin to open it in the panel.
+- **Keyboard review mode (F7):** `C` comment at the mouse, `1`–`4` severity of the
+  selected comment, `N` / `Shift+N` next / previous, `D` page reviewed, `Enter` edit,
+  `Esc` exit.
+
+### The review panel (Ctrl+Shift+R)
+
+- Severity tiles with the open counts (click to filter), search, **This page** (follows
+  the page you're looking at), **@ Mentions**, **My sheets**, status, reviewer and round
+  filters, several sort orders.
+- Cards colored by severity. Click a card to jump to the exact spot. An open card shows
+  the snapshot and details, **Status Open / Fixed / Rejected** (anyone can set it; who and
+  when is kept in the history), severity, +1, edit / delete (your own), **Move pin**, and
+  replies with @mentions.
+- **Sheets:** tick sheets you finished, see progress and who reviewed what.
+- **Checklist:** the team checklist and your **sign-off**.
+- **Team:** your name and initials, the designer, review rounds, sheet assignments,
+  comment templates and checklist items (shared with everyone).
+- Without WebView2 a simple built-in list is shown instead.
+
+### New PDF revisions
+
+- Export the new revision into the same folder. Comments follow it: each comment
+  remembers its part and the words around it and is found again even when things moved a
+  bit. Card badges: ✓ found, ⚠ moved (please check), ✕ gone (part removed, maybe fixed).
+  **Move pin** corrects a spot.
+- **Compare:** panel ⋯ menu or **Review → Compare with Another Revision**: what changed
+  against another PDF in the folder is highlighted in pink.
+- **Rounds:** Team → Start round N+1. New comments are tagged with the round; filter
+  "New in round N".
+
+### Excel report (`Review-Report.xlsx`)
+
+- **Comments** sheet: a filterable table with severity and status colors, IDs, parts,
+  sheets, who/when, replies, +1s, revision found in, and snapshot pictures.
+- **Dashboard:** open counts, a chart per severity, comments per reviewer and per sheet.
+- **Progress:** reviewers, sheets reviewed, checklist and sign-offs.
+- Only the designer's PC writes it (Excel can't take many writers). If it's open in
+  Excel it tries again later. Others: **Open Excel report** opens the shared file, or a
+  personal copy when there is none yet.
+
+### Export PDF with comments
+
+**Review → Export PDF with Comments** saves a copy of the PDF with every comment as a
+sticky note colored by severity, for people who use Acrobat. The original is untouched.
+
+### Speed
+
+PDFs without a review folder pay nothing. Pins are drawn for visible pages only; page
+text is read one page at a time in idle moments; the panel is created the first time it's
+opened (the log shows "review: panel ready in N ms"); the Excel report, snapshots and
+compare run in the background.
+
+### From v0.3
+
+Your old `review-comments\<you>.csv` is moved into your new log automatically (the CSV
+is renamed to `.csv.migrated`). Other people's old CSVs keep showing until they open the
+new version.
 
 ## Smarter linking with design data (optional)
 
@@ -70,10 +132,17 @@ passed to Windows — no protocol handlers, no registry entries. Every other kin
 
 ## Where the changes live
 
-- File: `src/MainWindow.cpp`, function `LinkHandler::LaunchURL` — the single door every
-  clicked link walks through, for every document type. Two `if` blocks marked with
-  `smartpdf` comments (about 55 lines total): one for `search:` (+optional zoom), one for
-  `folder:`.
+- Links: `src/MainWindow.cpp`, function `LinkHandler::LaunchURL` — the single door every
+  clicked link walks through. Two `if` blocks marked with `smartpdf` comments: one for
+  `search:` (+optional zoom), one for `folder:`.
+- Review: `src/Review.cpp` (data: comments, logs, IDs, re-finding comments on new
+  revisions), `src/ReviewXlsx.cpp` (the Excel writer), `src/ReviewUI.cpp` (pins, pop-up,
+  panel, live sync, report, snapshots, compare, PDF export), `src/review/panel.html` (the
+  panel, built into the exe). Small hooks marked `smartpdf` / `Review` in `Canvas.cpp`,
+  `SumatraPDF.cpp`, `Menu.cpp`, `Accelerators.cpp`, `CommandAvailability.cpp`,
+  `SumatraStartup.cpp`, `MainWindow.*`, `WindowTab.*`, `AIChatCommon.cpp`.
+- Tests: `tools-smartpdf/tests/run-review-tests.sh` (data model + Excel file, runs on
+  Linux).
 - Tool: `tools-smartpdf/smartify.py` (adds the links to a PDF),
   `tools-smartpdf/make_test_pdf.py` + `smartpdf-test.pdf` (test sheet covering every
   behavior — instructions printed on page 1).
