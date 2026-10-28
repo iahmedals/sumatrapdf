@@ -112,6 +112,16 @@ text is read one page at a time in idle moments; the panel is created the first 
 opened (the log shows "review: panel ready in N ms"); the Excel report, snapshots and
 compare run in the background.
 
+### Try it: the review demo
+
+`tools-smartpdf/review-demo` holds a tiny generated 3-sheet design in two revisions
+(`Demo-Board_RevA.pdf`, `Demo-Board_RevB.pdf`) and comments from two demo reviewers made on
+revision A. Copy the folder somewhere (e.g. into a OneDrive folder), open
+`Demo-Board_RevB.pdf` and press Ctrl+Shift+R: the comments are found again on revision B
+(Q3 was removed: "gone"; the crystal area changed: "moved"), Review → Compare shows what
+changed, and Team → "I'm the designer" writes the Excel report. Regenerate it with
+`python3 tools-smartpdf/make_review_demo.py`.
+
 ### From v0.3
 
 Your old `review-comments\<you>.csv` is moved into your new log automatically (the CSV
@@ -141,8 +151,8 @@ passed to Windows — no protocol handlers, no registry entries. Every other kin
   panel, built into the exe). Small hooks marked `smartpdf` / `Review` in `Canvas.cpp`,
   `SumatraPDF.cpp`, `Menu.cpp`, `Accelerators.cpp`, `CommandAvailability.cpp`,
   `SumatraStartup.cpp`, `MainWindow.*`, `WindowTab.*`, `AIChatCommon.cpp`.
-- Tests: `tools-smartpdf/tests/run-review-tests.sh` (data model + Excel file, runs on
-  Linux).
+- Tests (Linux): `tools-smartpdf/tests/run-review-tests.sh` (data model + Excel file) and
+  `tools-smartpdf/tests/run-demo-anchor-test.sh` (comments re-found on a new revision).
 - Tool: `tools-smartpdf/smartify.py` (adds the links to a PDF),
   `tools-smartpdf/make_test_pdf.py` + `smartpdf-test.pdf` (test sheet covering every
   behavior — instructions printed on page 1).

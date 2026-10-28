@@ -717,7 +717,7 @@ static bool ResolveStep(ReviewSession* s, bool* didExtract) {
         job.Reset();
         job.key = str::Dup(next->key);
         job.active = true;
-        job.designatorAnchor = ReviewIsDesignator(next->anchorWord);
+        job.designatorAnchor = ReviewDesignatorScore(next->anchorWord) == 2;
         int target = ClampPage(s, next->page);
         job.pages.Append(target);
         if (job.designatorAnchor) {
@@ -1231,6 +1231,13 @@ static void SyncTick(MainWindow* win) {
 
 static int CountVisibleNetWorkPending(MainWindow* win, ReviewSession* s, bool* didExtract);
 
+// true if the user pressed a key or moved / clicked the mouse in the last ms milliseconds
+static bool UserInputWithinMs(DWORD ms) {
+    LASTINPUTINFO li{};
+    li.cbSize = sizeof(li);
+    return GetLastInputInfo(&li) && GetTickCount() - li.dwTime < ms;
+}
+
 // sheet titles for the panel (Sheets tab, report): reads the text of the remaining
 // pages, one page at a time and only while the user isn't doing anything.
 // Returns true while there are pages left
@@ -1249,9 +1256,7 @@ static bool PrefetchTitlesStep(MainWindow* win, ReviewSession* s, bool* didExtra
     if (next == 0) {
         return false;
     }
-    LASTINPUTINFO li{};
-    li.cbSize = sizeof(li);
-    if (GetLastInputInfo(&li) && GetTickCount() - li.dwTime < 1000) {
+    if (UserInputWithinMs(1000)) {
         return true; // the user is scrolling or typing: later
     }
     PageWords(s, next);
@@ -1267,7 +1272,10 @@ static void IdleTick(MainWindow* win) {
     }
     DWORD start = GetTickCount();
     int resolvedBefore = len(s->resolved);
-    bool didExtract = false;
+    // reading a page's text can take tens of ms: not while the user scrolls or zooms
+    // (pretending a page was already read this tick stops the steps before the next read)
+    bool userBusy = UserInputWithinMs(300);
+    bool didExtract = userBusy;
     bool more = true;
     while (more && (GetTickCount() - start) < 12) {
         more = ResolveStep(s, &didExtract);
@@ -1278,7 +1286,8 @@ static void IdleTick(MainWindow* win) {
     if (!more) {
         more = CountVisibleNetWorkPending(win, s, &didExtract) > 0;
     }
-    if (len(s->resolved) != resolvedBefore || didExtract) {
+    bool extracted = didExtract && !userBusy;
+    if (len(s->resolved) != resolvedBefore || extracted) {
         // pins moved or net markers became available; the panel gets one update at the end
         ScheduleRepaint(win, 0);
     }
@@ -1452,6 +1461,9 @@ void ReviewPaint(MainWindow* win, HDC hdc) {
     if (selected) {
         order.Append(selected);
     }
+    // zoomed far out with many pins: just dots (labels would overlap anyway, and
+    // measuring text for hundreds of labels would slow down scrolling)
+    bool compact = len(order) > 150;
 
     for (ReviewComment* c : order) {
         bool isOpen = c->status == ReviewStatus::Open;
@@ -1464,6 +1476,17 @@ void ReviewPaint(MainWindow* win, HDC hdc) {
         PaintNetMarkers(g, dm, s, c, scale);
 
         Point anchor = dm->CvtToScreen(c->curPage, PointF{c->curRect.x, c->curRect.y});
+        if (compact && c != selected) {
+            float r = 4.5f * scale;
+            Gdiplus::SolidBrush dot(GdipColor(col, alpha));
+            Gdiplus::Pen ring(Gdiplus::Color(alpha, 255, 255, 255), 1.f * scale);
+            g.FillEllipse(&dot, (float)anchor.x - r, (float)anchor.y - r, 2 * r, 2 * r);
+            g.DrawEllipse(&ring, (float)anchor.x - r, (float)anchor.y - r, 2 * r, 2 * r);
+            int hr = (int)r + 3;
+            s->pinRects.Append(Rect(anchor.x - hr, anchor.y - hr, 2 * hr, 2 * hr));
+            s->pinKeys.Append(c->key);
+            continue;
+        }
         if (c->IsBox()) {
             Rect rc = dm->CvtToScreen(c->curPage, c->curRect);
             Gdiplus::RectF r((float)rc.x, (float)rc.y, (float)rc.dx, (float)rc.dy);
@@ -1890,9 +1913,6 @@ ReviewComposer::~ReviewComposer() {
 }
 
 static void DestroyComposerTask(ReviewComposer* c) {
-    if (gComposer == c) {
-        gComposer = nullptr;
-    }
     delete c;
 }
 
@@ -1901,6 +1921,9 @@ static void CloseComposer(ReviewComposer* c) {
         return;
     }
     c->closing = true;
+    if (gComposer == c) {
+        gComposer = nullptr; // from now on only the posted task owns it
+    }
     if (c->hwnd) {
         ShowWindow(c->hwnd, SW_HIDE);
     }
@@ -4031,7 +4054,11 @@ void ReviewDestroyPanel(MainWindow* win) {
         return;
     }
     if (gComposer && gComposer->win == win) {
-        DestroyComposerTask(gComposer);
+        // not inside one of its messages: can be deleted right away
+        ReviewComposer* c = gComposer;
+        gComposer = nullptr;
+        c->closing = true;
+        delete c;
     }
     if (win->hwndCanvas) {
         KillTimer(win->hwndCanvas, kReviewSyncTimerId);

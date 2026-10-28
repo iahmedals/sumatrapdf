@@ -700,7 +700,12 @@ bool ReviewPageInRanges(Str ranges, int page) {
 
 // --- anchoring ---
 
-bool ReviewIsDesignator(Str w) {
+// common reference designator prefixes with 2-3 letters (any 1-letter prefix counts)
+static SeqStrings gDesignatorPrefixes =
+    "TP\0SW\0FB\0IC\0CN\0BT\0RN\0RP\0RV\0CR\0VR\0DS\0JP\0FL\0MH\0PS\0TR\0LED\0ANT\0BZ\0SP\0LS\0TH\0"
+    "NTC\0RLY\0OSC\0TVS\0MK\0FD\0FID\0HS\0XT\0ZD\0PTC\0PT\0ST\0TC\0CON\0SPK\0MIC\0BAT\0XTL\0REG\0";
+
+int ReviewDesignatorScore(Str w) {
     // 1-3 uppercase letters, 1-4 digits, optional trailing unit letter (U12A)
     int i = 0, nLetters = 0, nDigits = 0;
     while (i < w.len && w.s[i] >= 'A' && w.s[i] <= 'Z') {
@@ -714,7 +719,18 @@ bool ReviewIsDesignator(Str w) {
     if (i < w.len && w.s[i] >= 'A' && w.s[i] <= 'Z' && i == w.len - 1) {
         i++;
     }
-    return i == w.len && nLetters >= 1 && nLetters <= 3 && nDigits >= 1 && nDigits <= 4;
+    if (i != w.len || nLetters < 1 || nLetters > 3 || nDigits < 1 || nDigits > 4) {
+        return 0;
+    }
+    if (nLetters == 1 || SeqStrIndex(gDesignatorPrefixes, Str(w.s, nLetters)) >= 0) {
+        return 2;
+    }
+    // e.g. pin names (PA9); part numbers like SI2301 or BC847 are not designators
+    return nDigits <= 2 ? 1 : 0;
+}
+
+bool ReviewIsDesignator(Str w) {
+    return ReviewDesignatorScore(w) > 0;
 }
 
 static PointF Center(RectF r) {
@@ -764,7 +780,7 @@ constexpr float kNearTolerance = 6.f;
 void ReviewComputeFingerprint(ReviewComment* c, PointF pt, const Vec<ReviewWord>& words) {
     int best = -1;
     float bestD = 0;
-    bool bestIsDesignator = false;
+    int bestScore = 0;
     int n = len(words);
     for (int i = 0; i < n; i++) {
         const ReviewWord& w = words[i];
@@ -772,17 +788,17 @@ void ReviewComputeFingerprint(ReviewComment* c, PointF pt, const Vec<ReviewWord>
             continue;
         }
         float d = DistToRectSq(pt, w.rect);
-        bool isDes = ReviewIsDesignator(w.text);
-        float limit = isDes ? kAnchorDesignatorRadius : kAnchorWordRadius;
+        int score = ReviewDesignatorScore(w.text);
+        float limit = score > 0 ? kAnchorDesignatorRadius : kAnchorWordRadius;
         if (d > limit * limit) {
             continue;
         }
         // designators win over plain words
-        bool better = best < 0 || (isDes && !bestIsDesignator) || (isDes == bestIsDesignator && d < bestD);
+        bool better = best < 0 || score > bestScore || (score == bestScore && d < bestD);
         if (better) {
             best = i;
             bestD = d;
-            bestIsDesignator = isDes;
+            bestScore = score;
         }
     }
     str::FreePtr(&c->anchorWord);
@@ -969,6 +985,7 @@ bool ReviewLocateOnPage(const ReviewComment* c, const Vec<ReviewWord>& words, Po
 
 void ReviewWordsNearPoint(const Vec<ReviewWord>& words, PointF pt, TempStr* designatorOut, TempStr* clickedOut) {
     float bestDes = -1;
+    int bestScore = 0;
     float bestClick = -1;
     for (const ReviewWord& w : words) {
         float d = DistToRectSq(pt, w.rect);
@@ -976,10 +993,14 @@ void ReviewWordsNearPoint(const Vec<ReviewWord>& words, PointF pt, TempStr* desi
             bestClick = d;
             *clickedOut = str::DupTemp(w.text);
         }
-        if (designatorOut && ReviewIsDesignator(w.text)) {
+        int score = designatorOut ? ReviewDesignatorScore(w.text) : 0;
+        if (score > 0) {
+            // a sure designator (U5) beats a closer maybe-designator (pin PA9)
             float dc = DistSq(pt, Center(w.rect));
-            if (dc <= 250.f * 250.f && (bestDes < 0 || dc < bestDes)) {
+            bool better = bestDes < 0 || score > bestScore || (score == bestScore && dc < bestDes);
+            if (dc <= 250.f * 250.f && better) {
                 bestDes = dc;
+                bestScore = score;
                 *designatorOut = str::DupTemp(w.text);
             }
         }

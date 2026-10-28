@@ -179,6 +179,8 @@ bool ReviewPageInRanges(Str ranges, int page); // "1-20, 33"
 // --- anchoring across PDF revisions ---
 
 bool ReviewIsDesignator(Str w);
+// 0: not a reference designator, 1: maybe (pin names like PA9), 2: surely (R12, U5A, TP103)
+int ReviewDesignatorScore(Str w);
 // picks the anchor word near pt and fills c->anchorWord/anchorDx/anchorDy/nearWords
 void ReviewComputeFingerprint(ReviewComment* c, PointF pt, const Vec<ReviewWord>& words);
 // locates comment c on a page given its words; returns true if the anchor word was

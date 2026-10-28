@@ -137,6 +137,12 @@ static void TestHelpers() {
     CHECK(ReviewIsDesignator(StrL("TP103")));
     CHECK(!ReviewIsDesignator(StrL("GND")));
     CHECK(!ReviewIsDesignator(StrL("VREG_S4A_1P8")));
+    // part numbers are not designators, pin names are weak ones
+    CHECK(!ReviewIsDesignator(StrL("SI2301")));
+    CHECK(!ReviewIsDesignator(StrL("BC847")));
+    CHECK(ReviewDesignatorScore(StrL("PA9")) == 1);
+    CHECK(ReviewDesignatorScore(StrL("LED12")) == 2);
+    CHECK(ReviewDesignatorScore(StrL("Q3")) == 2);
     CHECK(ReviewSeverityFromName(StrL("minor")) == ReviewSeverity::Minor);
     CHECK(ReviewStatusFromName(StrL("Rejected")) == ReviewStatus::Rejected);
 }
