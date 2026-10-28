@@ -603,6 +603,11 @@ static TempStr BuildDashboardSheet(ReviewXlsxArgs* args, Vec<ReviewComment*>& co
         sub.Append(fmt("  \xc2\xb7  designer: %s", UserNameOr(m, m->designer)));
     }
     sb.Text(1, Str(sub.els, (int)sub.len), XsSubtitle);
+    sb.Row(3);
+    sb.Text(1,
+            StrL("Read-only report, refreshed automatically by SmartPDF. Add or change comments in SmartPDF: "
+                 "edits made here are overwritten."),
+            XsSubtitle);
 
     // KPI cards
     sb.Row(4, 34);
