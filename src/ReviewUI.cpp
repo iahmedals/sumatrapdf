@@ -65,6 +65,8 @@ connects it to the viewer:
 constexpr const char* kReviewFolderName = "review-comments";
 constexpr const char* kReviewReportName = "Review-Report.xlsx";
 constexpr const char* kPanelHost = "https://smartpdf.review/";
+// placingKey value while waiting for the click that places a new comment
+constexpr const char* kPlaceNewComment = "#new";
 
 // severity colors: Critical, Major, Minor, Comment
 static const COLORREF kSevColor[kReviewSeverityCount] = {RGB(0xF0, 0x44, 0x38), RGB(0xF9, 0x73, 0x16),
@@ -1520,9 +1522,16 @@ bool ReviewOnLeftButtonDown(MainWindow* win, int x, int y) {
     DisplayModel* dm = win->AsFixed();
     if (len(s->placingKey) > 0 && dm) {
         int page = dm->GetPageNoByPoint(pt);
-        ReviewComment* c = s->model.FindComment(s->placingKey);
+        if (page < 1) {
+            return true; // keep waiting for a click on a page
+        }
+        bool isNew = str::Eq(s->placingKey, kPlaceNewComment);
+        ReviewComment* c = isNew ? nullptr : s->model.FindComment(s->placingKey);
         str::FreePtr(&s->placingKey);
-        if (page > 0 && c) {
+        PanelUpdate(win);
+        if (isNew) {
+            ReviewAddComment(win, pt, true);
+        } else if (c) {
             WriteMoveEvent(win, s, c, page, dm->CvtFromScreen(pt, page));
         }
         return true;
@@ -3060,6 +3069,8 @@ static TempStr PanelStateJsonTemp(MainWindow* win) {
         jc.S("text", c->text);
         jc.I("page", c->curPage);
         jc.I("origPage", c->page);
+        jc.I("x", (i64)c->curRect.x); // reading order within a page
+        jc.I("y", (i64)c->curRect.y);
         jc.S("rev", c->rev);
         jc.S("sheet", c->sheet);
         jc.S("comp", c->component);
@@ -3336,8 +3347,13 @@ static void HandlePanelMessage(MainWindow* win, Str msg) {
         return;
     }
     if (str::Eq(cmd, "addComment")) {
-        Rect rc = ClientRect(win->hwndCanvas);
-        ReviewAddComment(win, Point{rc.dx / 2, rc.dy / 3}, true);
+        // the next click on the page says where the comment goes
+        ReviewSession* ns = CurrentSession(win, true);
+        if (ns) {
+            SetStr(&ns->placingKey, StrL(kPlaceNewComment));
+            ShowReviewToast(win, _TRA("Click on the schematic where the comment goes (Esc cancels)"), false, 6000);
+            PanelUpdate(win);
+        }
         return;
     }
     if (str::Eq(cmd, "reviewMode")) {
@@ -3380,6 +3396,13 @@ static void HandlePanelMessage(MainWindow* win, Str msg) {
     if (str::Eq(cmd, "showResolved")) {
         s->showResolved = m.GetBool("on");
         RefreshReviewUI(win);
+        return;
+    }
+    if (str::Eq(cmd, "cancelPlacing")) {
+        if (len(s->placingKey) > 0) {
+            str::FreePtr(&s->placingKey);
+            PanelUpdate(win);
+        }
         return;
     }
     if (str::Eq(cmd, "move")) {
